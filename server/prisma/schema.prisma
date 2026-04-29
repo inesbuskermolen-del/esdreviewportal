@@ -1,0 +1,107 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Project {
+  id               String   @id @default(cuid())
+  name             String
+  address          String?
+  bessScore        Float?
+  date             DateTime?
+  revision         String?
+  projectId        String?
+  reviewLinkToken  String   @unique @default(cuid())
+  generationStatus String   @default("idle")
+  notifyEmail      String?
+  createdAt        DateTime @default(now())
+  gdft             Boolean  @default(false)
+  parentProjectId  String?
+  parent           Project?  @relation("ProjectRevisions", fields: [parentProjectId], references: [id])
+  revisions        Project[] @relation("ProjectRevisions")
+  credits          Credit[]
+  reviewers        Reviewer[]
+  drawingItems     DrawingRequirement[]
+  excellenceItems  ESDExcellenceOpportunity[]
+}
+
+model Credit {
+  id                 String   @id @default(cuid())
+  projectId          String
+  project            Project  @relation(fields: [projectId], references: [id])
+  category           String
+  categoryOrder      Int
+  creditId           String
+  creditName         String
+  creditRequirement  String?
+  mandatory          Boolean  @default(false)
+  responsibleParty   String?
+  creditStatus       String
+  creditScore        Float?
+  creditWeight       Float?
+  commentsGIW        String?
+  scopedOutReason    String?
+  rawDataPoints      String?
+  lastEditedBy       String?
+  lastEditedAt       DateTime?
+  deletedByGIW       Boolean  @default(false)
+  hiddenFromPortal   Boolean  @default(false)
+  comments           CreditComment[]
+  excellenceItems    ESDExcellenceOpportunity[]
+}
+
+model CreditComment {
+  id                 String   @id @default(cuid())
+  creditId           String
+  credit             Credit   @relation(fields: [creditId], references: [id])
+  projectId          String
+  reviewerEmail      String
+  reviewerDiscipline String
+  commentText        String
+  submittedAt        DateTime @default(now())
+}
+
+model Reviewer {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id])
+  email        String
+  discipline   String
+  hasSubmitted Boolean   @default(false)
+  submittedAt  DateTime?
+  inviteToken  String?   @unique
+}
+
+model DrawingRequirement {
+  id              String  @id @default(cuid())
+  projectId       String
+  project         Project @relation(fields: [projectId], references: [id])
+  creditReference String
+  drawingType     String
+  requirement     String
+  discipline      String?
+  status          String  @default("NotStarted")
+  notes           String?
+}
+
+model ESDExcellenceOpportunity {
+  id                     String    @id @default(cuid())
+  projectId              String
+  project                Project   @relation(fields: [projectId], references: [id])
+  creditId               String?
+  credit                 Credit?   @relation(fields: [creditId], references: [id])
+  creditReference        String
+  creditName             String
+  currentScore           Float?
+  improvementDescription String?
+  flag                   String    @default("Unflagged")
+  flaggedBy              String?
+  flaggedAt              DateTime?
+  reviewerNotes          String?
+  bessPoints             String?
+  deletedByGIW           Boolean   @default(false)
+}

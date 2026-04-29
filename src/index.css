@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #C0C0C0 25%, #FFFFFF 50%, #C0C0C0 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 3px;
+}
+
+@layer base {
+  body {
+    background-color: #FFFFFF;
+    color: #2C2C2C;
+    font-family: 'Open Sans', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6, nav {
+    font-family: 'Montserrat', sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-giw-olive text-white font-medium text-[13px] px-5 py-2 rounded-sm
+           hover:bg-giw-olive-dark transition-colors cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  .btn-secondary {
+    @apply bg-transparent border border-giw-olive text-giw-olive font-medium text-[13px] px-5 py-2 rounded-sm
+           hover:bg-giw-olive-light transition-colors cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  .btn-danger {
+    @apply text-white font-medium text-[13px] px-5 py-2 rounded-sm transition-colors cursor-pointer;
+    font-family: 'Montserrat', sans-serif;
+    background-color: #B94040;
+  }
+
+  .btn-danger:hover {
+    background-color: #8C2F2F;
+  }
+
+  .giw-card {
+    @apply border border-giw-border rounded p-6;
+    background-color: #FFFFFF;
+  }
+
+  .giw-input {
+    @apply w-full border border-giw-border rounded-sm px-3 py-2 text-sm bg-white
+           focus:outline-none focus:border-giw-olive transition-colors;
+    font-family: 'Open Sans', sans-serif;
+  }
+}
