@@ -1260,7 +1260,6 @@ function AdminExcellenceSection({ items, localFlags, flagging, onFlag, onDelete,
 
   function cardProps(item: ESDExcellenceOpportunity) {
     return {
-      key: item.id,
       item,
       flag: localFlags[item.id] ?? item.flag,
       isFlagging: !!flagging[item.id],
