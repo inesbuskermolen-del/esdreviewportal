@@ -1,3 +1,13 @@
+// Catch any uncaught synchronous throws (e.g. from module-level code in imports)
+process.on('uncaughtException', (err) => {
+  console.error('[startup] Uncaught exception:', err)
+  process.exit(1)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[startup] Unhandled rejection:', reason)
+  process.exit(1)
+})
+
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
@@ -12,58 +22,45 @@ import drawingRequirementsRouter from './routes/drawing-requirements'
 
 dotenv.config()
 
-const app = express()
-const PORT = process.env.PORT || 3001
+console.log('[startup] ESD Review Portal server initialising')
+console.log('[startup] NODE_ENV    :', process.env.NODE_ENV ?? '(not set)')
+console.log('[startup] PORT        :', process.env.PORT ?? '(not set — defaulting to 3001)')
+console.log('[startup] DATABASE_URL:', process.env.DATABASE_URL ? '*** set ***' : '*** MISSING ***')
+console.log('[startup] JWT_SECRET  :', process.env.JWT_SECRET  ? '*** set ***' : '*** MISSING ***')
+console.log('[startup] BASE_URL    :', process.env.BASE_URL ?? '(not set — defaulting to http://localhost:5173)')
 
-app.use(
-  cors({
-    origin: process.env.BASE_URL || 'http://localhost:5173',
-    credentials: true,
-  }),
-)
-app.use(express.json())
-app.use(cookieParser())
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET']
+const missing = REQUIRED_ENV.filter((k) => !process.env[k])
+if (missing.length > 0) {
+  console.error('[startup] FATAL: missing required environment variables:', missing.join(', '))
+  console.error('[startup] Add these in Railway → Variables, then redeploy.')
+  process.exit(1)
+}
 
-app.use('/api/auth', authRouter)
-app.use('/api/projects', projectsRouter)
-app.use('/api/review', reviewRouter)
-app.use('/api/credits', creditsRouter)
-app.use('/api/excellence', excellenceRouter)
-app.use('/api/drawing-requirements', drawingRequirementsRouter)
+try {
+  const app = express()
+  const PORT = process.env.PORT || 3001
 
-app.listen(PORT, () => {
-  console.log(`\nESD Review Portal server running on http://localhost:${PORT}\n`)
-  console.log('Registered API routes:')
-  console.log('  Auth:')
-  console.log('    POST   /api/auth/request-link')
-  console.log('    GET    /api/auth/verify')
-  console.log('    POST   /api/auth/logout')
-  console.log('    GET    /api/auth/me')
-  console.log('  Projects:')
-  console.log('    GET    /api/projects')
-  console.log('    POST   /api/projects')
-  console.log('    GET    /api/projects/:id')
-  console.log('    PATCH  /api/projects/:id')
-  console.log('    POST   /api/projects/:id/export')
-  console.log('    POST   /api/projects/:id/generate')
-  console.log('    GET    /api/projects/:id/generation-status')
-  console.log('    GET    /api/projects/:id/credits')
-  console.log('    GET    /api/projects/:id/excellence')
-  console.log('    GET    /api/projects/:id/drawing-requirements')
-  console.log('    POST   /api/projects/create-from-pdf')
-  console.log('  Review:')
-  console.log('    POST   /api/review/identify')
-  console.log('    GET    /api/review/:token/project')
-  console.log('    GET    /api/review/:token/drawings')
-  console.log('    POST   /api/review/:projectId/submit')
-  console.log('  Credits:')
-  console.log('    PATCH  /api/credits/:id/giw-comment')
-  console.log('    POST   /api/credits/:id/comment')
-  console.log('  Excellence:')
-  console.log('    PATCH  /api/excellence/:id/flag')
-  console.log('    DELETE /api/excellence/:id')
-  console.log('    DELETE /api/projects/:id/excellence')
-  console.log('  Drawing Requirements:')
-  console.log('    PATCH  /api/drawing-requirements/:id')
-  console.log('')
-})
+  app.use(
+    cors({
+      origin: process.env.BASE_URL || 'http://localhost:5173',
+      credentials: true,
+    }),
+  )
+  app.use(express.json())
+  app.use(cookieParser())
+
+  app.use('/api/auth', authRouter)
+  app.use('/api/projects', projectsRouter)
+  app.use('/api/review', reviewRouter)
+  app.use('/api/credits', creditsRouter)
+  app.use('/api/excellence', excellenceRouter)
+  app.use('/api/drawing-requirements', drawingRequirementsRouter)
+
+  app.listen(PORT, () => {
+    console.log(`[startup] Server listening on port ${PORT}`)
+  })
+} catch (err) {
+  console.error('[startup] FATAL: failed to start server:', err)
+  process.exit(1)
+}
