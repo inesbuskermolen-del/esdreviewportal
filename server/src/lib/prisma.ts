@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 
 if (!process.env.DATABASE_URL) {
-  console.error('[prisma] FATAL: DATABASE_URL is not set. Add it in Railway → Variables.')
+  console.error('[prisma] FATAL: DATABASE_URL is not set. Add it in the Render dashboard → Environment.')
   process.exit(1)
 }
 

@@ -57,10 +57,12 @@ router.get('/verify', async (req: Request, res: Response): Promise<void> => {
       { expiresIn: '7d' },
     )
 
+    // Cross-origin (GitHub Pages → Render) requires SameSite=None; Secure.
+    const isProd = process.env.NODE_ENV === 'production'
     res.cookie('giw_token', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     })
 

@@ -10,7 +10,7 @@ import ReviewInvite from '@/pages/ReviewInvite'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.PROD ? import.meta.env.BASE_URL : '/'}>
       <AuthProvider>
         <Routes>
           <Route path="/" element={<Navigate to="/admin" replace />} />

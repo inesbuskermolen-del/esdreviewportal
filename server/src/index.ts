@@ -33,7 +33,7 @@ const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET']
 const missing = REQUIRED_ENV.filter((k) => !process.env[k])
 if (missing.length > 0) {
   console.error('[startup] FATAL: missing required environment variables:', missing.join(', '))
-  console.error('[startup] Add these in Railway → Variables, then redeploy.')
+  console.error('[startup] Add these in the Render dashboard → Environment, then redeploy.')
   process.exit(1)
 }
 
@@ -41,9 +41,13 @@ try {
   const app = express()
   const PORT = process.env.PORT || 3001
 
+  // CORS: allow the frontend origin (GitHub Pages in prod, localhost in dev).
+  // BASE_URL may include a path (e.g. https://host/esdreviewportal) — extract just the origin.
+  const rawBase = process.env.BASE_URL || 'http://localhost:5173'
+  const allowedOrigin = new URL(rawBase).origin
   app.use(
     cors({
-      origin: process.env.BASE_URL || 'http://localhost:5173',
+      origin: allowedOrigin,
       credentials: true,
     }),
   )
