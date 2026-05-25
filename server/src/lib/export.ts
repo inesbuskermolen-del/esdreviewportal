@@ -53,7 +53,8 @@ function addLogoRow(
   lastCol: string,
   logoBuffer: Buffer,
 ) {
-  const imageId = wb.addImage({ buffer: logoBuffer, extension: 'png' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const imageId = wb.addImage({ buffer: logoBuffer as any, extension: 'png' })
   const logoRow = ws.addRow([])
   logoRow.height = 60
   ws.mergeCells(`A${logoRow.number}:${lastCol}${logoRow.number}`)
@@ -250,7 +251,8 @@ function buildReviewMatrixSheet(wb: ExcelJS.Workbook, p: ProjectData, logoBuffer
   ws.mergeCells(`A${logoRow.number}:${LAST}${logoRow.number}`)
   logoRow.getCell(1).fill = fill(C.green)
   if (logoBuffer) {
-    const imageId = wb.addImage({ buffer: logoBuffer, extension: 'png' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const imageId = wb.addImage({ buffer: logoBuffer as any, extension: 'png' })
     ws.addImage(imageId, {
       tl: { col: 0, row: logoRow.number - 1 },
       ext: { width: 160, height: 48 },
