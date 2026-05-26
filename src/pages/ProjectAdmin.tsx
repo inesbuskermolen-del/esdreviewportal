@@ -1320,7 +1320,7 @@ function AdminExcellenceSection({ items, localFlags, flagging, onFlag, onDelete,
     ['Improvement Description', 260], ['Flag', 100], ['Comments', 220], ['', 60],
   ]
 
-  function ExcellenceTable({ rows, mb, hideCurrentScore, showGdft }: { rows: ESDExcellenceOpportunity[], mb?: string, hideCurrentScore?: boolean, showGdft?: boolean }) {
+  function renderTable(rows: ESDExcellenceOpportunity[], mb?: string, hideCurrentScore?: boolean, showGdft?: boolean) {
     const cols = hideCurrentScore ? EXCELLENCE_COLS.filter(([label]) => label !== 'Current Score') : EXCELLENCE_COLS
     return (
       <div style={{ borderRadius: '4px', border: '1px solid #C0C0C0', marginBottom: mb }}>
@@ -1364,7 +1364,7 @@ function AdminExcellenceSection({ items, localFlags, flagging, onFlag, onDelete,
             </h2>
             <div style={{ height: '2px', width: '48px', backgroundColor: '#00602B', borderRadius: '1px' }} />
           </div>
-          <ExcellenceTable rows={regularItems} mb="48px" />
+          {renderTable(regularItems, '48px')}
         </>
       )}
 
@@ -1376,7 +1376,7 @@ function AdminExcellenceSection({ items, localFlags, flagging, onFlag, onDelete,
             </h2>
             <div style={{ height: '2px', width: '48px', backgroundColor: '#00602B', borderRadius: '1px' }} />
           </div>
-          <ExcellenceTable rows={innovationItems} hideCurrentScore showGdft={gdft} />
+          {renderTable(innovationItems, undefined, true, gdft)}
         </>
       )}
     </div>

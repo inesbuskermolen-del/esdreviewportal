@@ -965,7 +965,7 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
   ]
   const cols = baseCols
 
-  function ExcellenceTable({ rows, mb, hideCurrentScore }: { rows: ESDExcellenceOpportunity[], mb?: string, hideCurrentScore?: boolean }) {
+  function renderTable(rows: ESDExcellenceOpportunity[], mb?: string, hideCurrentScore?: boolean) {
     const tableCols = hideCurrentScore ? cols.filter(([label]) => label !== 'Current Score') : cols
     return (
       <div style={{ borderRadius: '4px', border: '1px solid #C0C0C0', marginBottom: mb }}>
@@ -984,7 +984,7 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
             </tr>
           </thead>
           <tbody>
-            {rows.map((item) => <ExcellenceRow {...cardProps(item)} hideCurrentScore={hideCurrentScore} />)}
+            {rows.map((item) => <ExcellenceRow key={item.id} {...cardProps(item)} hideCurrentScore={hideCurrentScore} />)}
           </tbody>
         </table>
       </div>
@@ -1004,7 +1004,7 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
               The following additional BESS points have been identified to improve the BESS score. Note that these items are not mandatory.
             </p>
           </div>
-          <ExcellenceTable rows={regularItems} mb="48px" />
+          {renderTable(regularItems, '48px')}
         </>
       )}
 
@@ -1019,7 +1019,7 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
               Maximum 10 innovation points can be claimed per project
             </p>
           </div>
-          <ExcellenceTable rows={innovationItems} hideCurrentScore />
+          {renderTable(innovationItems, undefined, true)}
         </>
       )}
     </div>
