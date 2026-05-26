@@ -104,4 +104,16 @@ model ESDExcellenceOpportunity {
   reviewerNotes          String?
   bessPoints             String?
   deletedByGIW           Boolean   @default(false)
+  notesList              ESDExcellenceNote[]
+}
+
+model ESDExcellenceNote {
+  id            String                   @id @default(cuid())
+  excellenceId  String
+  excellence    ESDExcellenceOpportunity @relation(fields: [excellenceId], references: [id])
+  reviewerEmail String
+  notes         String                   @default("")
+  updatedAt     DateTime                 @updatedAt
+
+  @@unique([excellenceId, reviewerEmail])
 }

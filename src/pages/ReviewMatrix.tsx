@@ -887,8 +887,10 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
 
   async function saveNotes(id: string, explicitValue?: string) {
     const value = explicitValue ?? notesMap[id] ?? ''
+    const body: Record<string, string> = { reviewerNotes: value }
+    if (!isGIW && session?.reviewerEmail) body.reviewerEmail = session.reviewerEmail
     try {
-      await axios.patch(`/api/excellence/${id}/notes`, { reviewerNotes: value })
+      await axios.patch(`/api/excellence/${id}/notes`, body)
       setNotesSaved((s) => new Set([...s, id]))
       setNotesErrors((s) => { const n = new Set(s); n.delete(id); return n })
       setTimeout(() => setNotesSaved((s) => { const n = new Set(s); n.delete(id); return n }), 2000)

@@ -937,7 +937,7 @@ router.get('/:id/excellence', async (req: Request, res: Response): Promise<void>
 
     const creditSelect = { id: true, creditId: true, category: true, creditStatus: true, creditWeight: true, creditScore: true } as const
     const allItemsSelect = { flag: true, creditReference: true, bessPoints: true, creditId: true, currentScore: true } as const
-    const [items, weightCredits, allCredits, allItems, projectRow] = await Promise.all([
+    const [items, weightCredits, allCredits, allItems, projectRow, reviewerNoteRows] = await Promise.all([
       prisma.eSDExcellenceOpportunity.findMany({
         where: {
           projectId: req.params.id,
@@ -953,8 +953,14 @@ router.get('/:id/excellence', async (req: Request, res: Response): Promise<void>
       prisma.credit.findMany({ where: { projectId: req.params.id, deletedByGIW: false }, select: creditSelect }),
       prisma.eSDExcellenceOpportunity.findMany({ where: { projectId: req.params.id, deletedByGIW: false }, select: allItemsSelect }),
       prisma.project.findUnique({ where: { id: req.params.id }, select: { bessScore: true } }),
+      prisma.eSDExcellenceNote.findMany({
+        where: { reviewerEmail: reviewerEmail!, excellence: { projectId: req.params.id } },
+        select: { excellenceId: true, notes: true },
+      }),
     ])
+    const reviewerNotesMap = Object.fromEntries(reviewerNoteRows.map(r => [r.excellenceId, r.notes]))
     const filteredWithPoints = computeItemsBessPoints(items, weightCredits, allCredits)
+      .map(item => ({ ...item, reviewerNotes: reviewerNotesMap[item.id] ?? null }))
     const currentBESS = computeCurrentBESS(weightCredits)
     const allWithPoints = computeItemsBessPoints(
       allItems.map(i => ({ ...i, id: '' })),

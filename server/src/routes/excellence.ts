@@ -46,13 +46,22 @@ router.patch('/:id/description', requireGIW, async (req: Request, res: Response)
 
 /* PATCH /api/excellence/:id/notes — GIW or reviewer */
 router.patch('/:id/notes', async (req: Request, res: Response): Promise<void> => {
-  const { reviewerNotes } = req.body as { reviewerNotes?: string }
+  const { reviewerNotes, reviewerEmail } = req.body as { reviewerNotes?: string; reviewerEmail?: string }
   try {
-    const item = await prisma.eSDExcellenceOpportunity.update({
-      where: { id: req.params.id },
-      data: { reviewerNotes: reviewerNotes?.trim() || null },
-    })
-    res.json(item)
+    if (reviewerEmail) {
+      await prisma.eSDExcellenceNote.upsert({
+        where: { excellenceId_reviewerEmail: { excellenceId: req.params.id, reviewerEmail } },
+        update: { notes: reviewerNotes ?? '' },
+        create: { excellenceId: req.params.id, reviewerEmail, notes: reviewerNotes ?? '' },
+      })
+      res.json({ ok: true })
+    } else {
+      const item = await prisma.eSDExcellenceOpportunity.update({
+        where: { id: req.params.id },
+        data: { reviewerNotes: reviewerNotes?.trim() || null },
+      })
+      res.json(item)
+    }
   } catch (err) {
     console.error('[excellence] notes error:', err)
     res.status(500).json({ error: 'Failed to save notes' })
