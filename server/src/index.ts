@@ -41,13 +41,16 @@ try {
   const app = express()
   const PORT = process.env.PORT || 3001
 
-  // CORS: allow the frontend origin (GitHub Pages in prod, localhost in dev).
-  // BASE_URL may include a path (e.g. https://host/esdreviewportal) — extract just the origin.
-  const rawBase = process.env.BASE_URL || 'http://localhost:5173'
-  const allowedOrigin = new URL(rawBase).origin
+  // Always allow the production GitHub Pages origin and localhost dev server.
+  // Also accept whatever BASE_URL is set to (extracts the origin, ignores any path suffix).
+  const allowedOrigins = new Set(['https://inesbuskermolen-del.github.io', 'http://localhost:5173'])
+  if (process.env.BASE_URL) {
+    try { allowedOrigins.add(new URL(process.env.BASE_URL).origin) } catch { /* ignore bad URL */ }
+  }
+  console.log('[startup] CORS origins:', [...allowedOrigins].join(', '))
   app.use(
     cors({
-      origin: allowedOrigin,
+      origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)),
       credentials: true,
     }),
   )
