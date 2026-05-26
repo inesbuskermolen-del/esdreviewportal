@@ -526,14 +526,15 @@ export default function ReviewMatrix() {
               </div>
             )}
 
-            {/* ESD Excellence Opportunities */}
-            {(isGIW || ['architect', 'developer', 'esd consultant', 'services engineer'].includes((session?.reviewerDiscipline ?? '').toLowerCase())) && !loading && (
+            {/* ESD Excellence Opportunities — shown to all reviewers */}
+            {!loading && (
               excellenceItems.length > 0 ? (
                 <ExcellenceSection
                   items={excellenceItems}
                   localFlags={localFlags}
                   flagging={flagging}
                   isGIW={isGIW}
+                  session={session}
                   onFlag={handleFlag}
                 />
               ) : credits.length > 0 && (
@@ -857,10 +858,11 @@ interface ExcellenceSectionProps {
   localFlags: Record<string, string>
   flagging: Record<string, boolean>
   isGIW: boolean
+  session: ReviewerSession | null
   onFlag: (id: string, flag: string) => void
 }
 
-function ExcellenceSection({ items, localFlags, flagging, isGIW, onFlag }: ExcellenceSectionProps) {
+function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag }: ExcellenceSectionProps) {
   const [notesMap, setNotesMap] = useState<Record<string, string>>({})
   const [notesSaved, setNotesSaved] = useState<Set<string>>(new Set())
   const [notesErrors, setNotesErrors] = useState<Set<string>>(new Set())
@@ -883,14 +885,30 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, onFlag }: Excel
     })
   }, [items])
 
-  async function saveNotes(id: string) {
+  async function saveNotes(id: string, explicitValue?: string) {
+    const value = explicitValue ?? notesMap[id] ?? ''
     try {
-      await axios.patch(`/api/excellence/${id}/notes`, { reviewerNotes: notesMap[id] ?? '' })
+      await axios.patch(`/api/excellence/${id}/notes`, { reviewerNotes: value })
       setNotesSaved((s) => new Set([...s, id]))
       setNotesErrors((s) => { const n = new Set(s); n.delete(id); return n })
       setTimeout(() => setNotesSaved((s) => { const n = new Set(s); n.delete(id); return n }), 2000)
     } catch {
       setNotesErrors((s) => new Set([...s, id]))
+    }
+  }
+
+  // When a reviewer flags an item, prepend a confirmation line to notes
+  // without overwriting any manual text they've already written.
+  function handleFlagWithNote(itemId: string, flag: string) {
+    onFlag(itemId, flag)
+    if (!isGIW && session) {
+      const AUTO_RE = /^Flagged as: (?:Yes|No|Maybe)\.\n{0,2}/
+      const currentNotes = notesMap[itemId] ?? ''
+      const manualPart = currentNotes.replace(AUTO_RE, '')
+      const autoLine = flag !== 'Unflagged' ? `Flagged as: ${flag}.\n\n` : ''
+      const newNotes = (autoLine + manualPart).trimEnd()
+      setNotesMap((m) => ({ ...m, [itemId]: newNotes }))
+      saveNotes(itemId, newNotes)
     }
   }
 
@@ -935,7 +953,7 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, onFlag }: Excel
       onNotesBlur: () => saveNotes(item.id),
       notesSaved: notesSaved.has(item.id),
       notesError: notesErrors.has(item.id),
-      onFlag: (f: string) => onFlag(item.id, f),
+      onFlag: (f: string) => handleFlagWithNote(item.id, f),
     }
   }
 
