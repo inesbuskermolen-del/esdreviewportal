@@ -22,6 +22,11 @@ import drawingRequirementsRouter from './routes/drawing-requirements'
 
 dotenv.config()
 
+// Strip trailing slash from BASE_URL so URL construction never produces double slashes
+if (process.env.BASE_URL) {
+  process.env.BASE_URL = process.env.BASE_URL.replace(/\/+$/, '')
+}
+
 console.log('[startup] ESD Review Portal server initialising')
 console.log('[startup] NODE_ENV    :', process.env.NODE_ENV ?? '(not set)')
 console.log('[startup] PORT        :', process.env.PORT ?? '(not set — defaulting to 3001)')
