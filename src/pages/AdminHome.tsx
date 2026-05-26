@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import NavBar from '@/components/NavBar'
@@ -7,18 +7,26 @@ import type { Project, ReviewerSummary, RevisionSummary } from '@/types'
 export default function AdminHome() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [slowApi, setSlowApi] = useState(false)
   const navigate = useNavigate()
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     document.title = 'ESD Review Portal | GIW Environmental Solutions'
   }, [])
 
   useEffect(() => {
+    slowTimer.current = setTimeout(() => setSlowApi(true), 4000)
     axios
       .get<Project[]>('/api/projects', { withCredentials: true })
       .then((res) => setProjects(res.data))
       .catch(console.error)
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (slowTimer.current) clearTimeout(slowTimer.current)
+        setSlowApi(false)
+        setLoading(false)
+      })
+    return () => { if (slowTimer.current) clearTimeout(slowTimer.current) }
   }, [])
 
   const copyReviewLink = (token: string) => {
@@ -42,6 +50,16 @@ export default function AdminHome() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#FFFFFF' }}>
       <NavBar />
+
+      {slowApi && (
+        <div style={{
+          backgroundColor: '#FFF8E1', borderBottom: '1px solid #FFE082',
+          padding: '10px 24px', textAlign: 'center',
+          fontFamily: 'Open Sans, sans-serif', fontSize: '13px', color: '#6B5900',
+        }}>
+          The server is waking up — this may take up to 60 seconds on first load.
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-6 py-10">
         {/* Page header */}
