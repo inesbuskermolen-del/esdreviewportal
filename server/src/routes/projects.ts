@@ -587,8 +587,10 @@ router.post('/:id/invite', requireGIW, async (req: Request, res: Response): Prom
     }
     const base = process.env.BASE_URL || 'http://localhost:5173'
     const inviteLink = `${base}/review/invite/${inviteToken}`
-    await sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), name?.trim() || null, project.address || null)
+    // Respond immediately — email is sent in the background so the UI doesn't wait on SMTP
     res.json({ ok: true, reviewerId: reviewer.id })
+    sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), name?.trim() || null, project.address || null)
+      .catch(err => console.error('[invite] email send failed:', err))
   } catch (err) {
     console.error('[invite] error:', err)
     res.status(500).json({ error: 'Failed to send invite' })
