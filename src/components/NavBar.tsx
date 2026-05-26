@@ -26,7 +26,7 @@ export default function NavBar() {
       >
         {/* Logo */}
         <Link to={user ? '/admin' : '/'} className="flex items-center no-underline">
-          <img src={`${import.meta.env.BASE_URL}GIW logo.png`} alt="GIW Environmental Solutions" style={{ height: '50px' }} />
+          <img src={`${import.meta.env.BASE_URL}GIW_logo_horizontal_white.png`} alt="GIW Environmental Solutions" style={{ height: '40px', filter: 'brightness(0) invert(1)' }} />
         </Link>
 
         {/* Desktop nav */}

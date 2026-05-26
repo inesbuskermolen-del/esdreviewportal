@@ -19,7 +19,7 @@ async function send(to: string | string[], subject: string, html: string, attach
 /* ── Shared branded wrapper ── */
 function emailTemplate(bodyContent: string): string {
   const BASE_URL = process.env.BASE_URL || 'http://localhost:5173'
-  const logoUrl = `${BASE_URL}/GIW%20logo.png`
+  const logoUrl = `${BASE_URL}/GIW_logo_horizontal_white.png`
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -30,7 +30,7 @@ function emailTemplate(bodyContent: string): string {
         <!-- Header -->
         <tr>
           <td style="background:#00602B;padding:20px 32px;">
-            <img src="${logoUrl}" alt="GIW Environmental Solutions" height="40" style="display:block;">
+            <img src="${logoUrl}" alt="GIW Environmental Solutions" height="40" style="display:block;filter:brightness(0) invert(1);">
           </td>
         </tr>
         <!-- Body -->
