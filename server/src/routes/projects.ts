@@ -211,11 +211,40 @@ router.post(
       // Trim excessively long PDFs to stay within a safe input token budget
       const trimmedText = pdfText.length > 60000 ? pdfText.slice(0, 60000) + '\n[text truncated]' : pdfText
 
-      /* 2. Two-pass parse:
-            Pass A — lightweight: project info + credit statuses/scores (small output).
-            Pass B — requirements + rawDataPoints fetched per-credit by generate.ts.
-         This keeps Pass A well under the 8192-token output limit. */
-      const userPrompt = `Extract from this BESS assessment PDF and return a single JSON object:
+      /* 2. Create a stub project immediately so the response goes back before
+            the AI call (which can exceed Render's 30-second request timeout). */
+      const stub = await prisma.project.create({
+        data: { name: 'Processing…', generationStatus: 'running' },
+      })
+      res.status(201).json({ projectId: stub.id })
+
+      /* 3. All heavy work runs in the background — triggerCommentGeneration will
+            set generationStatus 'complete' or 'error' when finished. */
+      ;(async () => {
+        try {
+          await processUploadedPdf(stub.id, trimmedText, file.originalname)
+        } catch (bgErr: unknown) {
+          const e = bgErr as Error
+          console.error('[create-from-pdf] background processing failed:', e?.message ?? bgErr)
+          await prisma.project.update({
+            where: { id: stub.id },
+            data: { generationStatus: 'error' },
+          }).catch(console.error)
+        }
+      })()
+    } catch (err: unknown) {
+      const e = err as Error
+      console.error('[create-from-pdf] FAILED:', e?.message ?? err)
+      if (!res.headersSent) {
+        res.status(500).json({ error: `Failed to process PDF: ${e?.message ?? 'unknown error'}` })
+      }
+    }
+  },
+)
+
+/* ── Background PDF processing (runs after response is sent) ── */
+async function processUploadedPdf(projectId: string, trimmedText: string, originalName: string): Promise<void> {
+  const userPrompt = `Extract from this BESS assessment PDF and return a single JSON object:
 {
   "project": {
     "name": "string",
@@ -256,163 +285,132 @@ Rules:
 BESS text:
 ${trimmedText}`
 
-      const message = await anthropic.messages.stream({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 32000,
-        system: 'You are a JSON extraction tool. Output only a valid JSON object. No markdown fences, no commentary.',
-        messages: [{ role: 'user', content: userPrompt }],
-      }).finalMessage()
+  const message = await anthropic.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 32000,
+    system: 'You are a JSON extraction tool. Output only a valid JSON object. No markdown fences, no commentary.',
+    messages: [{ role: 'user', content: userPrompt }],
+  }).finalMessage()
 
-      const rawContent = message.content[0]
-      if (rawContent.type !== 'text') {
-        res.status(422).json({ error: 'Unexpected response from AI parser' })
-        return
-      }
+  const rawContent = message.content[0]
+  if (rawContent.type !== 'text') throw new Error('Unexpected response type from AI parser')
 
-      const jsonText = rawContent.text
-      console.log('[create-from-pdf] stop_reason:', message.stop_reason, '— response length:', jsonText.length)
+  const jsonText = rawContent.text
+  console.log('[create-from-pdf] stop_reason:', message.stop_reason, '— response length:', jsonText.length)
 
-      let parsed: {
-        project: {
-          name: string
-          address?: string
-          projectId?: string
-          bessScore?: number
-          date?: string
-        }
-        credits: Array<{
-          creditId: string
-          creditName: string
-          category: string
-          creditRequirement?: string
-          creditScore?: number
-          creditWeight?: number
-          creditStatus: string
-          scopedOutReason?: string
-          rawDataPoints?: string
-        }>
-        supportingEvidence: Array<{
-          creditReference: string
-          type: string
-          requirement: string
-        }>
-      }
-
-      try {
-        parsed = JSON.parse(extractJSON(jsonText))
-      } catch (parseErr) {
-        console.error('[create-from-pdf] JSON parse failed. stop_reason:', message.stop_reason)
-        console.error('[create-from-pdf] Raw response:\n', jsonText.slice(0, 1200))
-        res.status(422).json({ error: 'AI parser returned invalid JSON. Try uploading again.' })
-        return
-      }
-
-      /* 3. Detect existing project by address → auto-assign revision */
-      const extractedAddress = parsed.project.address?.trim() || null
-      const normalizeAddr = (a: string) => a.toLowerCase().replace(/\s+/g, ' ').trim()
-
-      let parentProjectId: string | null = null
-      let revisionLabel = 'A'
-
-      if (extractedAddress) {
-        const rootProjects = await prisma.project.findMany({
-          where: { parentProjectId: null, address: { not: null } },
-          select: { id: true, address: true, revisions: { select: { id: true } } },
-        })
-        const match = rootProjects.find(
-          (p) => p.address && normalizeAddr(p.address) === normalizeAddr(extractedAddress),
-        )
-        if (match) {
-          parentProjectId = match.id
-          const nextIndex = 1 + match.revisions.length
-          revisionLabel = String.fromCharCode(65 + nextIndex)
-        }
-      }
-
-      /* 4. Persist to database */
-      const project = await prisma.project.create({
-        data: {
-          name: parsed.project.name?.trim() || file.originalname,
-          address: extractedAddress,
-          bessScore:
-            parsed.project.bessScore != null
-              ? parseFloat(String(parsed.project.bessScore))
-              : null,
-          date: parsed.project.date ? new Date(parsed.project.date) : null,
-          projectId: parsed.project.projectId?.trim() || null,
-          revision: revisionLabel,
-          parentProjectId,
-          generationStatus: 'running',
-        },
-      })
-
-      /* 4. Create credits */
-      const creditData = (parsed.credits ?? []).map((c) => {
-        const meta = CREDIT_META[normaliseCreditId(c.creditId)] ?? CREDIT_META[c.creditId] ?? {
-          mandatory: false,
-          responsibleParty: null,
-        }
-        const normalisedCreditId = normaliseCreditId(c.creditId)
-        return {
-          projectId: project.id,
-          creditId: normalisedCreditId,
-          creditName: c.creditName,
-          category: c.category,
-          categoryOrder: getCategoryOrder(c.creditId, c.category),
-          creditRequirement: c.creditRequirement?.trim() ?? null,
-          creditScore: c.creditScore != null ? parseFloat(String(c.creditScore)) : null,
-          creditWeight: c.creditWeight != null ? parseFloat(String(c.creditWeight)) : null,
-          creditStatus: c.creditStatus,
-          scopedOutReason: c.scopedOutReason ?? null,
-          rawDataPoints: c.rawDataPoints?.trim() ?? null,
-          mandatory: meta.mandatory,
-          responsibleParty: meta.responsibleParty ?? null,
-        }
-      })
-
-      await prisma.credit.createMany({ data: creditData })
-
-
-      /* 5. Create drawing requirements — floor plan annotations for achieved credits only */
-      const DRAWING_EXCLUDED_CREDITS = new Set(['ieq 1.1', 'ieq 1.2', 'ieq 2.1', 'ieq 3.1', 'management 2.3', 'iwm 2.1'])
-      const achievedCreditIds = new Set(
-        (parsed.credits ?? [])
-          .filter((c) => c.creditStatus === 'Y')
-          .map((c) => c.creditId.trim().toLowerCase()),
-      )
-      const drawingData = (parsed.supportingEvidence ?? [])
-        .filter((e) => {
-          const ref = e.creditReference.trim().toLowerCase()
-          return (
-            e.type !== 'Supporting Document' &&
-            achievedCreditIds.has(ref) &&
-            !DRAWING_EXCLUDED_CREDITS.has(ref)
-          )
-        })
-        .map((e) => ({
-          projectId: project.id,
-          creditReference: e.creditReference,
-          drawingType: e.type,
-          requirement: e.requirement,
-        }))
-
-      if (drawingData.length > 0) {
-        await prisma.drawingRequirement.createMany({ data: drawingData })
-      }
-
-      /* 6. Trigger stub generation jobs */
-      triggerCommentGeneration(project.id).catch(console.error)
-      triggerDrawingGeneration(project.id).catch(console.error)
-
-      res.status(201).json({ projectId: project.id })
-    } catch (err: unknown) {
-      const e = err as Error
-      console.error('[create-from-pdf] FAILED:', e?.message ?? err)
-      console.error('[create-from-pdf] Stack:', e?.stack?.split('\n')[1])
-      res.status(500).json({ error: `Failed to process PDF: ${e?.message ?? 'unknown error'}` })
+  let parsed: {
+    project: {
+      name: string
+      address?: string
+      projectId?: string
+      bessScore?: number
+      date?: string
     }
-  },
-)
+    credits: Array<{
+      creditId: string
+      creditName: string
+      category: string
+      creditRequirement?: string
+      creditScore?: number
+      creditWeight?: number
+      creditStatus: string
+      scopedOutReason?: string
+      rawDataPoints?: string
+    }>
+    supportingEvidence: Array<{
+      creditReference: string
+      type: string
+      requirement: string
+    }>
+  }
+
+  try {
+    parsed = JSON.parse(extractJSON(jsonText))
+  } catch {
+    console.error('[create-from-pdf] JSON parse failed. stop_reason:', message.stop_reason)
+    console.error('[create-from-pdf] Raw response:\n', jsonText.slice(0, 1200))
+    throw new Error('AI parser returned invalid JSON')
+  }
+
+  /* Detect existing project by address → auto-assign revision */
+  const extractedAddress = parsed.project.address?.trim() || null
+  const normalizeAddr = (a: string) => a.toLowerCase().replace(/\s+/g, ' ').trim()
+
+  let parentProjectId: string | null = null
+  let revisionLabel = 'A'
+
+  if (extractedAddress) {
+    const rootProjects = await prisma.project.findMany({
+      where: { parentProjectId: null, address: { not: null }, id: { not: projectId } },
+      select: { id: true, address: true, revisions: { select: { id: true } } },
+    })
+    const match = rootProjects.find(
+      (p) => p.address && normalizeAddr(p.address) === normalizeAddr(extractedAddress),
+    )
+    if (match) {
+      parentProjectId = match.id
+      const nextIndex = 1 + match.revisions.length
+      revisionLabel = String.fromCharCode(65 + nextIndex)
+    }
+  }
+
+  /* Update stub project with real data */
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      name: parsed.project.name?.trim() || originalName,
+      address: extractedAddress,
+      bessScore: parsed.project.bessScore != null ? parseFloat(String(parsed.project.bessScore)) : null,
+      date: parsed.project.date ? new Date(parsed.project.date) : null,
+      projectId: parsed.project.projectId?.trim() || null,
+      revision: revisionLabel,
+      parentProjectId,
+    },
+  })
+
+  /* Create credits */
+  const creditData = (parsed.credits ?? []).map((c) => {
+    const meta = CREDIT_META[normaliseCreditId(c.creditId)] ?? CREDIT_META[c.creditId] ?? {
+      mandatory: false,
+      responsibleParty: null,
+    }
+    return {
+      projectId,
+      creditId: normaliseCreditId(c.creditId),
+      creditName: c.creditName,
+      category: c.category,
+      categoryOrder: getCategoryOrder(c.creditId, c.category),
+      creditRequirement: c.creditRequirement?.trim() ?? null,
+      creditScore: c.creditScore != null ? parseFloat(String(c.creditScore)) : null,
+      creditWeight: c.creditWeight != null ? parseFloat(String(c.creditWeight)) : null,
+      creditStatus: c.creditStatus,
+      scopedOutReason: c.scopedOutReason ?? null,
+      rawDataPoints: c.rawDataPoints?.trim() ?? null,
+      mandatory: meta.mandatory,
+      responsibleParty: meta.responsibleParty ?? null,
+    }
+  })
+  await prisma.credit.createMany({ data: creditData })
+
+  /* Create drawing requirements */
+  const DRAWING_EXCLUDED_CREDITS = new Set(['ieq 1.1', 'ieq 1.2', 'ieq 2.1', 'ieq 3.1', 'management 2.3', 'iwm 2.1'])
+  const achievedCreditIds = new Set(
+    (parsed.credits ?? []).filter((c) => c.creditStatus === 'Y').map((c) => c.creditId.trim().toLowerCase()),
+  )
+  const drawingData = (parsed.supportingEvidence ?? [])
+    .filter((e) => {
+      const ref = e.creditReference.trim().toLowerCase()
+      return e.type !== 'Supporting Document' && achievedCreditIds.has(ref) && !DRAWING_EXCLUDED_CREDITS.has(ref)
+    })
+    .map((e) => ({ projectId, creditReference: e.creditReference, drawingType: e.type, requirement: e.requirement }))
+  if (drawingData.length > 0) {
+    await prisma.drawingRequirement.createMany({ data: drawingData })
+  }
+
+  /* Trigger comment + drawing generation (these set generationStatus to complete/error) */
+  triggerCommentGeneration(projectId).catch(console.error)
+  triggerDrawingGeneration(projectId).catch(console.error)
+}
 
 /* GET /api/projects */
 router.get('/', requireGIW, async (_req: GIWRequest, res: Response): Promise<void> => {
