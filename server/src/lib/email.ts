@@ -1,15 +1,17 @@
 import nodemailer from 'nodemailer'
 
+const smtpPort = parseInt(process.env.SMTP_PORT || '587')
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587'),
+  port: smtpPort,
+  secure: smtpPort === 465,  // true for 465 (SSL), false for 587 (STARTTLS)
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  connectionTimeout: 8000,
-  greetingTimeout: 8000,
-  socketTimeout: 15000,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
 })
 
 export async function sendReviewInvite(

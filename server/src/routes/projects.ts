@@ -588,8 +588,8 @@ router.post('/:id/invite', requireGIW, async (req: Request, res: Response): Prom
     const base = process.env.BASE_URL || 'http://localhost:5173'
     const inviteLink = `${base}/review/invite/${inviteToken}`
 
-    // Race email send against a 20s timeout so the UI gets real feedback without hanging forever
-    const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 20000))
+    // Race email send against a 35s timeout so the UI gets real feedback without hanging forever
+    const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 35000))
     const result = await Promise.race([
       sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), name?.trim() || null, project.address || null)
         .then(() => 'sent' as const)
