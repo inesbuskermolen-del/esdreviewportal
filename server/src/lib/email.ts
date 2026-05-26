@@ -4,7 +4,7 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 const FROM = process.env.SMTP_FROM || 'GIW Environmental Solutions <onboarding@resend.dev>'
 
 async function send(to: string | string[], subject: string, html: string, attachments?: Array<{ filename: string; content: Buffer; contentType: string }>) {
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: FROM,
     to: Array.isArray(to) ? to : [to],
     subject,
@@ -14,6 +14,7 @@ async function send(to: string | string[], subject: string, html: string, attach
       content: a.content,
     })),
   })
+  if (error) throw new Error(`Resend error: ${(error as { message?: string }).message ?? JSON.stringify(error)}`)
 }
 
 /* ── Shared branded wrapper ── */
