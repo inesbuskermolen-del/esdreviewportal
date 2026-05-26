@@ -23,13 +23,13 @@ function emailTemplate(bodyContent: string): string {
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#F7F5F0;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;padding:32px 0;">
+<body style="margin:0;padding:0;background:#f0f0f0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 0;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #D8D5CE;border-radius:4px;overflow:hidden;">
         <!-- Header -->
         <tr>
-          <td style="background:#2C2C2C;padding:20px 32px;">
+          <td style="background:#00602B;padding:20px 32px;">
             <img src="${logoUrl}" alt="GIW Environmental Solutions" height="40" style="display:block;">
           </td>
         </tr>
@@ -41,8 +41,8 @@ function emailTemplate(bodyContent: string): string {
         </tr>
         <!-- Footer -->
         <tr>
-          <td style="background:#E8EDD8;padding:16px 32px;font-family:'Open Sans',Arial,sans-serif;font-size:12px;color:#8C8C8C;">
-            GIW Environmental Solutions &nbsp;|&nbsp; <a href="https://giw.com.au" style="color:#6B7A3B;text-decoration:none;">giw.com.au</a>
+          <td style="background:#f0f0f0;padding:16px 32px;font-family:'Open Sans',Arial,sans-serif;font-size:12px;color:#8C8C8C;border-top:1px solid #D8D5CE;">
+            GIW Environmental Solutions &nbsp;|&nbsp; <a href="https://giw.com.au" style="color:#00602B;text-decoration:none;">giw.com.au</a>
           </td>
         </tr>
       </table>
@@ -52,9 +52,9 @@ function emailTemplate(bodyContent: string): string {
 </html>`
 }
 
-function btn(href: string, label: string, color = '#6B7A3B'): string {
+function btn(href: string, label: string): string {
   return `<p style="margin:28px 0 0 0;">
-    <a href="${href}" style="display:inline-block;background:${color};color:#ffffff;padding:12px 28px;
+    <a href="${href}" style="display:inline-block;background:#00602B;color:#ffffff;padding:12px 28px;
        text-decoration:none;font-family:Montserrat,Arial,sans-serif;font-weight:500;
        font-size:14px;border-radius:2px;letter-spacing:0.3px;">${label}</a>
   </p>`
@@ -104,7 +104,7 @@ export async function sendReviewSubmission(opts: {
       ${opts.toEmail} (${opts.discipline}) submitted their ESD review for
       <strong>${opts.projectName}</strong> on ${dateStr}.
     </p>
-    ${btn(adminLink, 'Open Project', '#00602B')}
+    ${btn(adminLink, 'Open Project')}
   `))
 }
 
@@ -170,7 +170,7 @@ export async function sendSubmissionAlert(opts: {
       ${opts.submitterEmail} (${opts.submitterDiscipline}) has submitted their ESD review for
       <strong>${opts.projectName}</strong> on ${dateStr}.
     </p>
-    ${btn(adminLink, 'Open Project', '#00602B')}
+    ${btn(adminLink, 'Open Project')}
   `)
 
   const sends: Promise<void>[] = []
