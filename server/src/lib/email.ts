@@ -152,6 +152,7 @@ export async function sendSubmissionAlert(opts: {
   submitterDiscipline: string
   projectName: string
   projectId: string
+  reviewLinkToken: string
   submittedAt: Date
   reviewerEmails: string[]
   notifyEmail: string | null
@@ -161,20 +162,38 @@ export async function sendSubmissionAlert(opts: {
 
   const base = process.env.BASE_URL || 'http://localhost:5173'
   const adminLink = `${base}/admin/projects/${opts.projectId}`
+  const reviewLink = `${base}/review/${opts.reviewLinkToken}`
   const dateStr = opts.submittedAt.toLocaleString('en-AU', {
     timeZone: 'Australia/Melbourne',
     dateStyle: 'medium',
     timeStyle: 'short',
   })
 
-  const body = (includeAdminLink: boolean) => `
+  const reviewerBody = `
     <div style="font-family: 'Open Sans', Arial, sans-serif; color: #2C2C2C; max-width: 600px;">
       <h2 style="font-family: Montserrat, Arial, sans-serif; color: #6B7A3B;">Review Submitted</h2>
       <p>
         ${opts.submitterEmail} (${opts.submitterDiscipline}) has submitted their ESD review for
         <strong>${opts.projectName}</strong> on ${dateStr}.
       </p>
-      ${includeAdminLink ? `
+      <p>
+        <a href="${reviewLink}"
+           style="display:inline-block; background:#6B7A3B; color:#fff; padding:10px 22px;
+                  text-decoration:none; font-family:Montserrat,Arial,sans-serif; font-weight:500;
+                  border-radius:2px;">
+          Open Review Portal
+        </a>
+      </p>
+    </div>
+  `
+
+  const adminBody = `
+    <div style="font-family: 'Open Sans', Arial, sans-serif; color: #2C2C2C; max-width: 600px;">
+      <h2 style="font-family: Montserrat, Arial, sans-serif; color: #6B7A3B;">Review Submitted</h2>
+      <p>
+        ${opts.submitterEmail} (${opts.submitterDiscipline}) has submitted their ESD review for
+        <strong>${opts.projectName}</strong> on ${dateStr}.
+      </p>
       <p>
         <a href="${adminLink}"
            style="display:inline-block; background:#00602B; color:#fff; padding:10px 22px;
@@ -182,16 +201,15 @@ export async function sendSubmissionAlert(opts: {
                   border-radius:2px;">
           Open Project
         </a>
-      </p>` : ''}
+      </p>
     </div>
   `
 
   const subject = `${opts.submitterDiscipline} review submitted – ${opts.projectName}`
 
-  // Send to reviewers (no admin link) and GIW notify address (with admin link) separately
   const sends: Promise<void>[] = []
-  if (reviewerEmails.length > 0) sends.push(send(reviewerEmails, subject, body(false)))
-  if (opts.notifyEmail) sends.push(send(opts.notifyEmail, subject, body(true)))
+  if (reviewerEmails.length > 0) sends.push(send(reviewerEmails, subject, reviewerBody))
+  if (opts.notifyEmail) sends.push(send(opts.notifyEmail, subject, adminBody))
   await Promise.all(sends)
 }
 

@@ -149,7 +149,7 @@ router.post('/:projectId/submit', async (req: Request, res: Response): Promise<v
   try {
     const project = await prisma.project.findUnique({
       where: { id: req.params.projectId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, reviewLinkToken: true },
     })
 
     if (!project) {
@@ -185,6 +185,7 @@ router.post('/:projectId/submit', async (req: Request, res: Response): Promise<v
       submitterDiscipline: reviewerDiscipline.trim(),
       projectName: project.name,
       projectId: project.id,
+      reviewLinkToken: project.reviewLinkToken,
       submittedAt,
       reviewerEmails: fullProject?.reviewers.map(r => r.email) ?? [],
       notifyEmail: fullProject?.notifyEmail ?? null,
