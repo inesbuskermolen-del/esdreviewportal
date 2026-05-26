@@ -781,7 +781,7 @@ export default function ProjectAdmin() {
         {/* Tab content */}
         {activeTab === 'matrix' && (
           <>
-            <ReviewMatrix credits={credits} gdft={project?.gdft ?? false} />
+            <ReviewMatrix credits={credits} gdft={project?.gdft ?? false} genStatus={genStatus} />
             <AdminExcellenceSection
               items={excellenceItems}
               localFlags={localFlags}
@@ -892,7 +892,7 @@ function groupByCategory(credits: Credit[]): { category: string; order: number; 
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-function ReviewMatrix({ credits, gdft }: { credits: Credit[]; gdft: boolean }) {
+function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: boolean; genStatus?: GenStatus }) {
   const [giwComments, setGiwComments] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
     for (const c of credits) init[c.id] = c.commentsGIW ?? ''
@@ -927,6 +927,27 @@ function ReviewMatrix({ credits, gdft }: { credits: Credit[]; gdft: boolean }) {
   }
 
   if (credits.length === 0) {
+    if (genStatus === 'running') {
+      return (
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="giw-card p-0 overflow-hidden">
+              <div style={{ backgroundColor: '#C8E6D4', padding: '10px 20px', borderBottom: '1px solid #C0C0C0' }}>
+                <div className="skeleton-shimmer" style={{ height: 14, width: 140, borderRadius: 2 }} />
+              </div>
+              <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[1, 2, 3].map((j) => (
+                  <div key={j} className="skeleton-shimmer" style={{ height: 12, width: `${70 + j * 8}%`, borderRadius: 2 }} />
+                ))}
+              </div>
+            </div>
+          ))}
+          <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '13px', color: '#8C8C8C', textAlign: 'center', paddingTop: '8px' }}>
+            Generating review matrix…
+          </p>
+        </div>
+      )
+    }
     return (
       <div className="text-center py-16">
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
