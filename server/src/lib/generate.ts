@@ -307,6 +307,15 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       }
     }
 
+    // IWM 3.1 scoped-out: fixed annotation confirming rainwater tank connection
+    if (/^iwm\s+3\.1$/i.test(credit.creditId.trim()) && credit.creditStatus === 'ScopedOut') {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'Landscape irrigation will be connected to the rainwater tank.' },
+      })
+      continue
+    }
+
     const templates = findTemplates(credit.creditId)
 
     if (templates.length > 0) {
@@ -597,6 +606,17 @@ export async function generateInnovationLineItems(projectId: string): Promise<vo
 /* ── Auto visibility rules ── */
 
 export async function applyAutoVisibilityRules(projectId: string): Promise<void> {
+  // IWM 3.1 scoped-out: restore if previously deleted with no comment, and fill annotation
+  const iwm31 = await prisma.credit.findFirst({
+    where: { projectId, creditStatus: 'ScopedOut', creditId: { equals: 'IWM 3.1', mode: 'insensitive' } },
+  })
+  if (iwm31 && (!iwm31.commentsGIW || iwm31.commentsGIW === '')) {
+    await prisma.credit.update({
+      where: { id: iwm31.id },
+      data: { deletedByGIW: false, commentsGIW: 'Landscape irrigation will be connected to the rainwater tank.' },
+    })
+  }
+
   // Soft-delete scoped-out credits that have no GIW comment
   await prisma.credit.updateMany({
     where: {
