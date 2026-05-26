@@ -342,6 +342,7 @@ ${trimmedText}`
           projectId: parsed.project.projectId?.trim() || null,
           revision: revisionLabel,
           parentProjectId,
+          generationStatus: 'running',
         },
       })
 
