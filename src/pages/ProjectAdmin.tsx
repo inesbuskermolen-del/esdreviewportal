@@ -550,6 +550,7 @@ export default function ProjectAdmin() {
                         color: '#C0C0C0',
                       }}
                     >
+                      <th className="text-left py-2 pr-4 font-medium">Name</th>
                       <th className="text-left py-2 pr-4 font-medium">Email</th>
                       <th className="text-left py-2 pr-4 font-medium">Discipline</th>
                       <th className="text-left py-2 pr-4 font-medium">Submitted</th>
@@ -568,6 +569,7 @@ export default function ProjectAdmin() {
                           backgroundColor: '#FFFFFF',
                         }}
                       >
+                        <td className="py-2 pr-4">{r.name ?? '—'}</td>
                         <td className="py-2 pr-4">{r.email}</td>
                         <td className="py-2 pr-4">{r.discipline}</td>
                         <td className="py-2 pr-4">
@@ -597,6 +599,7 @@ export default function ProjectAdmin() {
                                 const { data } = await axios.post<{ ok: boolean; emailWarning?: string }>(`/api/projects/${id}/invite`, {
                                   email: r.email,
                                   discipline: r.discipline,
+                                  ...(r.name ? { name: r.name } : {}),
                                 }, { withCredentials: true })
                                 if (data.emailWarning) {
                                   setInviteWarning(data.emailWarning)
