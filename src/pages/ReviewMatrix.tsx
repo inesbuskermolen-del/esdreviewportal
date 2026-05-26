@@ -111,7 +111,6 @@ export default function ReviewMatrix() {
 
   // Submit state
   const [submitting, setSubmitting] = useState(false)
-  const [submitSuccess, setSubmitSuccess] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
   // Sticky badge bar visibility
@@ -301,7 +300,7 @@ export default function ReviewMatrix() {
         reviewerEmail: session.reviewerEmail,
         reviewerDiscipline: session.reviewerDiscipline,
       })
-      setSubmitSuccess(true)
+      navigate(`/review/${reviewLinkToken}/submitted`)
     } catch {
       setSubmitError('Submission failed. Please try again.')
     } finally {
@@ -560,7 +559,7 @@ export default function ReviewMatrix() {
             )}
 
             {/* Submit button (reviewer only) */}
-            {!isGIW && !loading && !submitSuccess && credits.length > 0 && (
+            {!isGIW && !loading && credits.length > 0 && (
               <div className="mt-8">
                 {submitError && (
                   <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '13px', color: '#B94040', marginBottom: '8px' }}>
@@ -570,16 +569,6 @@ export default function ReviewMatrix() {
                 <button className="btn-primary" onClick={handleSubmit} disabled={submitting}>
                   {submitting ? 'Submitting…' : 'Submit My Review'}
                 </button>
-              </div>
-            )}
-
-            {submitSuccess && (
-              <div style={{
-                marginTop: '24px', padding: '14px 20px', borderRadius: '4px',
-                backgroundColor: '#C8E6D4', border: '1px solid #00602B', color: '#004D22',
-                fontFamily: 'Open Sans, sans-serif', fontSize: '14px',
-              }}>
-                Your review has been submitted. Thank you.
               </div>
             )}
 

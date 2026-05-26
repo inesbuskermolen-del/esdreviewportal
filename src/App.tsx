@@ -7,6 +7,7 @@ import ProjectAdmin from '@/pages/ProjectAdmin'
 import ReviewEntry from '@/pages/ReviewEntry'
 import ReviewMatrix from '@/pages/ReviewMatrix'
 import ReviewInvite from '@/pages/ReviewInvite'
+import ReviewSubmitted from '@/pages/ReviewSubmitted'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/review/invite/:inviteToken" element={<ReviewInvite />} />
           <Route path="/review/:reviewLinkToken" element={<ReviewEntry />} />
           <Route path="/review/:reviewLinkToken/matrix" element={<ReviewMatrix />} />
+          <Route path="/review/:reviewLinkToken/submitted" element={<ReviewSubmitted />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
