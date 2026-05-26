@@ -40,6 +40,7 @@ export interface Reviewer {
   id: string
   projectId: string
   email: string
+  name?: string | null
   discipline: string
   hasSubmitted: boolean
   submittedAt?: string | null

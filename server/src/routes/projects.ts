@@ -567,17 +567,24 @@ router.post('/:id/invite', requireGIW, async (req: Request, res: Response): Prom
     const existing = await prisma.reviewer.findFirst({
       where: { projectId: project.id, email: normalEmail },
     })
+    const trimmedName = name?.trim() || null
     let reviewer
     if (existing) {
       reviewer = await prisma.reviewer.update({
         where: { id: existing.id },
-        data: { discipline: discipline.trim(), inviteToken },
+        data: {
+          discipline: discipline.trim(),
+          inviteToken,
+          // Only overwrite stored name if a new one was provided
+          ...(trimmedName !== null && { name: trimmedName }),
+        },
       })
     } else {
       reviewer = await prisma.reviewer.create({
         data: {
           projectId: project.id,
           email: normalEmail,
+          name: trimmedName,
           discipline: discipline.trim(),
           inviteToken,
         },
@@ -586,10 +593,13 @@ router.post('/:id/invite', requireGIW, async (req: Request, res: Response): Prom
     const base = process.env.BASE_URL || 'http://localhost:5173'
     const inviteLink = `${base}/review/invite/${inviteToken}`
 
+    // Use stored name as fallback so resend also gets the name
+    const resolvedName = trimmedName ?? reviewer.name ?? null
+
     // Race email send against a 35s timeout so the UI gets real feedback without hanging forever
     const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 35000))
     const result = await Promise.race([
-      sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), name?.trim() || null, project.address || null)
+      sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), resolvedName, project.address || null)
         .then(() => 'sent' as const)
         .catch((err: unknown) => {
           console.error('[invite] email send failed:', err)

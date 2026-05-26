@@ -70,6 +70,7 @@ model Reviewer {
   projectId    String
   project      Project   @relation(fields: [projectId], references: [id])
   email        String
+  name         String?
   discipline   String
   hasSubmitted Boolean   @default(false)
   submittedAt  DateTime?
