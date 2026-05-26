@@ -316,6 +316,16 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
+    // OE 4.1, OE 4.4, IEQ 1.5, IEQ 1.6 scoped-out: mark as not targeted
+    const NOT_TARGETED_SCOPED = new Set(['oe 4.1', 'oe 4.4', 'ieq 1.5', 'ieq 1.6'])
+    if (NOT_TARGETED_SCOPED.has(credit.creditId.trim().toLowerCase()) && credit.creditStatus === 'ScopedOut') {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'Not targeted.' },
+      })
+      continue
+    }
+
     const templates = findTemplates(credit.creditId)
 
     if (templates.length > 0) {
@@ -606,15 +616,26 @@ export async function generateInnovationLineItems(projectId: string): Promise<vo
 /* ── Auto visibility rules ── */
 
 export async function applyAutoVisibilityRules(projectId: string): Promise<void> {
-  // IWM 3.1 scoped-out: restore if previously deleted with no comment, and fill annotation
-  const iwm31 = await prisma.credit.findFirst({
-    where: { projectId, creditStatus: 'ScopedOut', creditId: { equals: 'IWM 3.1', mode: 'insensitive' } },
+  // Fixed-comment scoped-out credits: restore if previously deleted with no comment
+  const fixedScopedComments: Array<{ pattern: RegExp; comment: string }> = [
+    { pattern: /^iwm\s*3\.1$/i, comment: 'Landscape irrigation will be connected to the rainwater tank.' },
+    { pattern: /^oe\s*4\.1$/i,  comment: 'Not targeted.' },
+    { pattern: /^oe\s*4\.4$/i,  comment: 'Not targeted.' },
+    { pattern: /^ieq\s*1\.5$/i, comment: 'Not targeted.' },
+    { pattern: /^ieq\s*1\.6$/i, comment: 'Not targeted.' },
+  ]
+  const scopedCredits = await prisma.credit.findMany({
+    where: { projectId, creditStatus: 'ScopedOut' },
+    select: { id: true, creditId: true, commentsGIW: true },
   })
-  if (iwm31 && (!iwm31.commentsGIW || iwm31.commentsGIW === '')) {
-    await prisma.credit.update({
-      where: { id: iwm31.id },
-      data: { deletedByGIW: false, commentsGIW: 'Landscape irrigation will be connected to the rainwater tank.' },
-    })
+  for (const sc of scopedCredits) {
+    const rule = fixedScopedComments.find(r => r.pattern.test(sc.creditId.trim()))
+    if (rule && (!sc.commentsGIW || sc.commentsGIW === '')) {
+      await prisma.credit.update({
+        where: { id: sc.id },
+        data: { deletedByGIW: false, commentsGIW: rule.comment },
+      })
+    }
   }
 
   // Soft-delete scoped-out credits that have no GIW comment
