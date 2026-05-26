@@ -8,6 +8,7 @@ export default function AdminHome() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [slowApi, setSlowApi] = useState(false)
+  const [search, setSearch] = useState('')
   const navigate = useNavigate()
   const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -63,7 +64,7 @@ export default function AdminHome() {
 
       <main className="max-w-7xl mx-auto px-6 py-10">
         {/* Page header */}
-        <div className="flex items-start justify-between mb-8">
+        <div className="flex items-start justify-between mb-6">
           <div>
             <h1 style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '28px', fontWeight: 600, color: '#2C2C2C', lineHeight: 1.2 }}>
               Projects
@@ -77,46 +78,110 @@ export default function AdminHome() {
           </button>
         </div>
 
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <ProjectCardSkeleton key={i} />
-            ))}
-          </div>
-        ) : projects.length === 0 ? (
-          <div className="giw-card text-center py-20">
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" opacity="0.3">
-                <rect x="4" y="8" width="32" height="26" rx="2" stroke="#00602B" strokeWidth="2" />
-                <path d="M4 14h32" stroke="#00602B" strokeWidth="2" />
-                <path d="M12 20h16M12 26h10" stroke="#00602B" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </div>
-            <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '14px', color: '#C0C0C0' }}>
-              No projects yet. Create your first project to get started.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {projects.map((project) => {
-              // Latest revision = last child, or the root itself if no children
-              const children = project.revisions ?? []
-              const latest = children.length > 0 ? children[children.length - 1] : null
-              const latestId = latest?.id ?? project.id
-              const latestToken = latest?.reviewLinkToken ?? project.reviewLinkToken
-              return (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  onOpenProject={() => navigate(`/admin/projects/${latestId}`)}
-                  onOpenRevision={(id) => navigate(`/admin/projects/${id}`)}
-                  onCopyLink={() => copyReviewLink(latestToken)}
-                  onDelete={() => deleteProject(project.id, project.name)}
-                />
+        {/* Search */}
+        <div style={{ position: 'relative', marginBottom: '24px', maxWidth: '400px' }}>
+          <svg
+            width="16" height="16" viewBox="0 0 16 16" fill="none"
+            style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+          >
+            <circle cx="7" cy="7" r="4.5" stroke="#8C8C8C" strokeWidth="1.4" />
+            <path d="M10.5 10.5L13.5 13.5" stroke="#8C8C8C" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search projects…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: '100%', paddingLeft: '34px', paddingRight: search ? '32px' : '12px',
+              height: '36px', border: '1px solid #D8D5CE', borderRadius: '2px',
+              fontFamily: 'Open Sans, sans-serif', fontSize: '13px', color: '#2C2C2C',
+              backgroundColor: '#fff', boxSizing: 'border-box', outline: 'none',
+            }}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              style={{
+                position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                color: '#8C8C8C', lineHeight: 1, fontSize: '16px',
+              }}
+              aria-label="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        {(() => {
+          const q = search.trim().toLowerCase()
+          const filtered = q
+            ? projects.filter((p) =>
+                p.name.toLowerCase().includes(q) ||
+                (p.address ?? '').toLowerCase().includes(q),
               )
-            })}
-          </div>
-        )}
+            : projects
+
+          if (loading) {
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <ProjectCardSkeleton key={i} />
+                ))}
+              </div>
+            )
+          }
+
+          if (projects.length === 0) {
+            return (
+              <div className="giw-card text-center py-20">
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" opacity="0.3">
+                    <rect x="4" y="8" width="32" height="26" rx="2" stroke="#00602B" strokeWidth="2" />
+                    <path d="M4 14h32" stroke="#00602B" strokeWidth="2" />
+                    <path d="M12 20h16M12 26h10" stroke="#00602B" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '14px', color: '#C0C0C0' }}>
+                  No projects yet. Create your first project to get started.
+                </p>
+              </div>
+            )
+          }
+
+          if (filtered.length === 0) {
+            return (
+              <div className="giw-card text-center py-16">
+                <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '14px', color: '#C0C0C0' }}>
+                  No projects match <strong style={{ color: '#8C8C8C' }}>"{search}"</strong>
+                </p>
+              </div>
+            )
+          }
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filtered.map((project) => {
+                // Latest revision = last child, or the root itself if no children
+                const children = project.revisions ?? []
+                const latest = children.length > 0 ? children[children.length - 1] : null
+                const latestId = latest?.id ?? project.id
+                const latestToken = latest?.reviewLinkToken ?? project.reviewLinkToken
+                return (
+                  <ProjectCard
+                    key={project.id}
+                    project={project}
+                    onOpenProject={() => navigate(`/admin/projects/${latestId}`)}
+                    onOpenRevision={(id) => navigate(`/admin/projects/${id}`)}
+                    onCopyLink={() => copyReviewLink(latestToken)}
+                    onDelete={() => deleteProject(project.id, project.name)}
+                  />
+                )
+              })}
+            </div>
+          )
+        })()}
       </main>
     </div>
   )
