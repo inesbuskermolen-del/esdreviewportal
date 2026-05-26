@@ -267,6 +267,24 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
+    // OE 1.1 special case: if the Non-residential buildings profile contains NLA values
+    // that are not the BESS defaults (1,000 / 10,000), J1V3 modelling has been run.
+    if (/^oe\s+1\.1$/i.test(credit.creditId.trim()) && credit.rawDataPoints) {
+      // Extract standalone integers/decimals that look like area values (100–999,999)
+      // and are not percentages (exclude numbers followed by %)
+      const areaNumbers = [...credit.rawDataPoints.matchAll(/\b(\d{1,3}(?:,\d{3})*|\d+(?:\.\d+)?)\b(?!\s*%)/g)]
+        .map(m => parseFloat(m[1].replace(/,/g, '')))
+        .filter(n => !isNaN(n) && n >= 100 && n <= 999999)
+      const hasNonDefaultNLA = areaNumbers.some(n => n !== 1000 && n !== 10000)
+      if (hasNonDefaultNLA) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: 'Preliminary J1V3 modelling has been undertaken and the development is achieving Section J compliance.' },
+        })
+        continue
+      }
+    }
+
     const templates = findTemplates(credit.creditId)
 
     if (templates.length > 0) {
