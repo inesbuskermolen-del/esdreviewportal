@@ -100,6 +100,7 @@ async function fetchProject(projectId: string): Promise<{
     notes: string | null
   }>
   excellenceItems: Array<{
+    id: string
     creditReference: string
     creditName: string
     currentScore: number | null
@@ -110,6 +111,7 @@ async function fetchProject(projectId: string): Promise<{
     bessPoints: string | null
     creditId: string | null
     additionalBessPoints?: number | null
+    notesList: Array<{ reviewerEmail: string; notes: string }>
   }>
 }> {
   return prisma.project.findUniqueOrThrow({
@@ -158,6 +160,7 @@ async function fetchProject(projectId: string): Promise<{
         where: { deletedByGIW: false },
         orderBy: { creditReference: 'asc' },
         select: {
+          id: true,
           creditReference: true,
           creditName: true,
           reviewerNotes: true,
@@ -167,6 +170,7 @@ async function fetchProject(projectId: string): Promise<{
           flaggedBy: true,
           bessPoints: true,
           creditId: true,
+          notesList: { select: { reviewerEmail: true, notes: true } },
         },
       },
     },
@@ -433,20 +437,42 @@ function buildReviewMatrixSheet(wb: ExcelJS.Workbook, p: ProjectData, logoBuffer
         addPts = item.additionalBessPoints
       }
 
+      // Collect reviewer notes: per-reviewer notesList first, fall back to legacy shared field
+      const perReviewerNotes = item.notesList.filter(n => n.notes.trim())
+      const notesText = perReviewerNotes.length > 0
+        ? perReviewerNotes.map(n => n.notes.trim()).join('\n\n')
+        : (item.reviewerNotes ?? '')
+
       const row = ws.addRow([
         item.creditReference,
         item.creditName,
         item.currentScore != null ? item.currentScore : '',
         item.improvementDescription ?? '',
         addPts,
-        item.reviewerNotes ?? '',
+        '',  // placeholder — rich text set below
       ])
+
+      // Build rich-text reviewer notes (coloured by reviewer, matching BESS team comments style)
+      if (perReviewerNotes.length > 0) {
+        row.getCell(6).value = buildCommentRichText(
+          perReviewerNotes.map(n => ({ reviewerEmail: n.reviewerEmail, reviewerDiscipline: '', commentText: n.notes.trim() })),
+          emailColorMap,
+        )
+      } else if (item.reviewerNotes) {
+        row.getCell(6).value = item.reviewerNotes
+      }
+
       row.height = autoRowHeight([
         { text: item.creditName, colWidth: 36 },
         { text: item.improvementDescription ?? '', colWidth: 46 },
-        { text: item.reviewerNotes ?? '', colWidth: 60 },
+        { text: notesText, colWidth: 60 },
       ])
-      row.eachCell((cell) => { cell.border = border(); cell.alignment = { vertical: 'top', wrapText: true } })
+      row.eachCell((cell) => {
+        cell.border = border()
+        cell.alignment = { vertical: 'top', wrapText: true }
+        cell.font = font({ size: 10 })
+      })
+      row.getCell(2).font = font({ bold: true, size: 10 })
     }
   }
 }
