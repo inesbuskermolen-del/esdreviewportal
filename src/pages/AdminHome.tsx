@@ -30,7 +30,7 @@ export default function AdminHome() {
   }, [])
 
   const copyReviewLink = (token: string) => {
-    const url = `${window.location.origin}/review/${token}`
+    const url = `${window.location.origin}${import.meta.env.BASE_URL}review/${token}`
     navigator.clipboard
       .writeText(url)
       .then(() => alert('Review link copied to clipboard.'))
