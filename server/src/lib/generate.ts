@@ -285,6 +285,28 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       }
     }
 
+    // OE 2.6 special case: office-only non-residential buildings should not mention
+    // induction cooktops — detect via OE 1.1's rawDataPoints having non-default NLA
+    // values that reference office but no residential/retail use types.
+    if (/^oe\s+2\.6$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const oe11 = credits.find(c => /^oe\s+1\.1$/i.test(c.creditId.trim()))
+      if (oe11?.rawDataPoints) {
+        const areaNumbers = [...oe11.rawDataPoints.matchAll(/\b(\d{1,3}(?:,\d{3})*|\d+(?:\.\d+)?)\b(?!\s*%)/g)]
+          .map(m => parseFloat(m[1].replace(/,/g, '')))
+          .filter(n => !isNaN(n) && n >= 100 && n <= 999999)
+        const hasNonDefaultNLA = areaNumbers.some(n => n !== 1000 && n !== 10000)
+        const mentionsOffice = /\boffice\b/i.test(oe11.rawDataPoints)
+        const mentionsOtherUse = /\bretail\b|\bresidential\b|\bdwelling\b|\bapartment\b|\bshop\b/i.test(oe11.rawDataPoints)
+        if (hasNonDefaultNLA && mentionsOffice && !mentionsOtherUse) {
+          await prisma.credit.update({
+            where: { id: credit.id },
+            data: { commentsGIW: 'The development will be all electric with no gas connection.' },
+          })
+          continue
+        }
+      }
+    }
+
     const templates = findTemplates(credit.creditId)
 
     if (templates.length > 0) {
