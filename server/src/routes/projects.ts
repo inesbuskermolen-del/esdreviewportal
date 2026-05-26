@@ -372,9 +372,6 @@ ${trimmedText}`
 
       await prisma.credit.createMany({ data: creditData })
 
-      /* 4b. Recalculate BESS score from credit data (replaces PDF-extracted score) */
-      const { recalculateBessScore } = await import('../lib/bess')
-      await recalculateBessScore(project.id).catch(console.error)
 
       /* 5. Create drawing requirements — floor plan annotations for achieved credits only */
       const DRAWING_EXCLUDED_CREDITS = new Set(['ieq 1.1', 'ieq 1.2', 'ieq 2.1', 'ieq 3.1', 'management 2.3', 'iwm 2.1'])

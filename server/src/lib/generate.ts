@@ -591,9 +591,6 @@ export async function triggerCommentGeneration(projectId: string): Promise<void>
     await generateInnovationLineItems(projectId)
     await generateExcellenceOpportunities(projectId)
     await applyAutoVisibilityRules(projectId)
-    // Recalculate BESS score from credit data after visibility rules may have soft-deleted credits
-    const { recalculateBessScore } = await import('./bess')
-    await recalculateBessScore(projectId).catch(console.error)
     await prisma.project.update({
       where: { id: projectId },
       data: { generationStatus: 'complete' },
