@@ -864,7 +864,18 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
   useEffect(() => {
     setNotesMap((prev) => {
       const m = { ...prev }
-      for (const item of items) if (!(item.id in m)) m[item.id] = item.reviewerNotes ?? ''
+      for (const item of items) {
+        if (item.id in m) continue
+        const stored = item.reviewerNotes ?? ''
+        // If the item is already flagged and this reviewer hasn't written anything yet,
+        // pre-fill with the same auto-line that handleFlagWithNote would have written,
+        // so other reviewers see the flag context without having to re-flag themselves.
+        if (!stored && item.flag && item.flag !== 'Unflagged') {
+          m[item.id] = `Flagged as: ${item.flag}.\n\n`
+        } else {
+          m[item.id] = stored
+        }
+      }
       return m
     })
     setDescMap((prev) => {
