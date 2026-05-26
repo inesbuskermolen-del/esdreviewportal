@@ -156,11 +156,8 @@ export async function sendSubmissionAlert(opts: {
   reviewerEmails: string[]
   notifyEmail: string | null
 }): Promise<void> {
-  const emails = [
-    ...opts.reviewerEmails,
-    ...(opts.notifyEmail ? [opts.notifyEmail] : []),
-  ].filter(Boolean)
-  if (emails.length === 0) return
+  const reviewerEmails = opts.reviewerEmails.filter(Boolean)
+  if (reviewerEmails.length === 0 && !opts.notifyEmail) return
 
   const base = process.env.BASE_URL || 'http://localhost:5173'
   const adminLink = `${base}/admin/projects/${opts.projectId}`
@@ -170,13 +167,14 @@ export async function sendSubmissionAlert(opts: {
     timeStyle: 'short',
   })
 
-  await send(emails, `${opts.submitterDiscipline} review submitted – ${opts.projectName}`, `
+  const body = (includeAdminLink: boolean) => `
     <div style="font-family: 'Open Sans', Arial, sans-serif; color: #2C2C2C; max-width: 600px;">
       <h2 style="font-family: Montserrat, Arial, sans-serif; color: #6B7A3B;">Review Submitted</h2>
       <p>
         ${opts.submitterEmail} (${opts.submitterDiscipline}) has submitted their ESD review for
         <strong>${opts.projectName}</strong> on ${dateStr}.
       </p>
+      ${includeAdminLink ? `
       <p>
         <a href="${adminLink}"
            style="display:inline-block; background:#00602B; color:#fff; padding:10px 22px;
@@ -184,9 +182,17 @@ export async function sendSubmissionAlert(opts: {
                   border-radius:2px;">
           Open Project
         </a>
-      </p>
+      </p>` : ''}
     </div>
-  `)
+  `
+
+  const subject = `${opts.submitterDiscipline} review submitted – ${opts.projectName}`
+
+  // Send to reviewers (no admin link) and GIW notify address (with admin link) separately
+  const sends: Promise<void>[] = []
+  if (reviewerEmails.length > 0) sends.push(send(reviewerEmails, subject, body(false)))
+  if (opts.notifyEmail) sends.push(send(opts.notifyEmail, subject, body(true)))
+  await Promise.all(sends)
 }
 
 export async function sendCompletionEmail(opts: {
