@@ -587,10 +587,26 @@ router.post('/:id/invite', requireGIW, async (req: Request, res: Response): Prom
     }
     const base = process.env.BASE_URL || 'http://localhost:5173'
     const inviteLink = `${base}/review/invite/${inviteToken}`
-    // Respond immediately — email is sent in the background so the UI doesn't wait on SMTP
-    res.json({ ok: true, reviewerId: reviewer.id })
-    sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), name?.trim() || null, project.address || null)
-      .catch(err => console.error('[invite] email send failed:', err))
+
+    // Race email send against a 20s timeout so the UI gets real feedback without hanging forever
+    const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 20000))
+    const result = await Promise.race([
+      sendReviewInviteByEmail(normalEmail, inviteLink, project.name, discipline.trim(), name?.trim() || null, project.address || null)
+        .then(() => 'sent' as const)
+        .catch((err: unknown) => {
+          console.error('[invite] email send failed:', err)
+          return err instanceof Error ? err.message : String(err)
+        }),
+      timeout,
+    ])
+
+    if (result === 'sent') {
+      res.json({ ok: true, reviewerId: reviewer.id })
+    } else if (result === 'timeout') {
+      res.json({ ok: true, reviewerId: reviewer.id, emailWarning: 'Email is taking longer than expected — it may still arrive, or check your SMTP settings.' })
+    } else {
+      res.json({ ok: true, reviewerId: reviewer.id, emailWarning: `Email failed to send: ${result}` })
+    }
   } catch (err) {
     console.error('[invite] error:', err)
     res.status(500).json({ error: 'Failed to send invite' })

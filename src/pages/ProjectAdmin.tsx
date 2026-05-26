@@ -74,6 +74,7 @@ export default function ProjectAdmin() {
   const [inviting, setInviting] = useState(false)
   const [inviteError, setInviteError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState(false)
+  const [inviteWarning, setInviteWarning] = useState('')
   const [notifyEmail, setNotifyEmail] = useState('')
   const [notifyEmailSaved, setNotifyEmailSaved] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -264,20 +265,25 @@ export default function ProjectAdmin() {
     setInviting(true)
     setInviteError('')
     setInviteSuccess(false)
+    setInviteWarning('')
     try {
-      await axios.post(`/api/projects/${id}/invite`, {
+      const { data } = await axios.post<{ ok: boolean; reviewerId: string; emailWarning?: string }>(`/api/projects/${id}/invite`, {
         email: inviteEmail.trim(),
         discipline: inviteDiscipline.trim(),
         name: inviteName.trim() || undefined,
       }, { withCredentials: true })
-      setInviteSuccess(true)
+      if (data.emailWarning) {
+        setInviteWarning(data.emailWarning)
+      } else {
+        setInviteSuccess(true)
+        setTimeout(() => setInviteSuccess(false), 5000)
+      }
       setInviteEmail('')
       setInviteName('')
       setInviteDiscipline('')
       // Refresh reviewers list
       const res = await axios.get<Project>(`/api/projects/${id}`, { withCredentials: true })
       setProject(res.data)
-      setTimeout(() => setInviteSuccess(false), 3000)
     } catch {
       setInviteError('Failed to send invite. Check the email address and try again.')
     } finally {
@@ -501,6 +507,11 @@ export default function ProjectAdmin() {
                   Invite sent!
                 </p>
               )}
+              {inviteWarning && (
+                <p className="mt-2 text-xs" style={{ fontFamily: 'Open Sans, sans-serif', color: '#B35900' }}>
+                  {inviteWarning}
+                </p>
+              )}
               {inviteError && (
                 <p className="mt-2 text-xs" style={{ fontFamily: 'Open Sans, sans-serif', color: '#B94040' }}>
                   {inviteError}
@@ -581,13 +592,18 @@ export default function ProjectAdmin() {
                               setInviting(true)
                               setInviteError('')
                               setInviteSuccess(false)
+                              setInviteWarning('')
                               try {
-                                await axios.post(`/api/projects/${id}/invite`, {
+                                const { data } = await axios.post<{ ok: boolean; emailWarning?: string }>(`/api/projects/${id}/invite`, {
                                   email: r.email,
                                   discipline: r.discipline,
                                 }, { withCredentials: true })
-                                setInviteSuccess(true)
-                                setTimeout(() => setInviteSuccess(false), 3000)
+                                if (data.emailWarning) {
+                                  setInviteWarning(data.emailWarning)
+                                } else {
+                                  setInviteSuccess(true)
+                                  setTimeout(() => setInviteSuccess(false), 5000)
+                                }
                               } catch {
                                 setInviteError('Failed to resend invite.')
                               } finally {
