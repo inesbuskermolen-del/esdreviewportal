@@ -200,7 +200,10 @@ export default function ReviewMatrix() {
         const initReviewer: Record<string, string> = {}
         for (const c of creditsRes.data) {
           initGIW[c.id] = c.commentsGIW ?? ''
-          if (!isGIW) initReviewer[c.id] = c.comments?.[0]?.commentText ?? ''
+          if (!isGIW) {
+            const myComment = c.comments?.find(cm => cm.reviewerEmail === reviewerEmail)
+            initReviewer[c.id] = myComment?.commentText ?? ''
+          }
         }
         setGiwComments(initGIW)
         setReviewerComments(initReviewer)
