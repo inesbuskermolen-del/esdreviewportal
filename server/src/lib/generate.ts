@@ -50,7 +50,7 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
   'oe 3.6': ['Maximum illumination power density for each dwelling is 4W/sqm or less.'],
   'oe 3.7': ['Maximum illumination power density (W/sqm) of the relevant building class is at least 20% lower than current NCC requirements.'],
   'oe 4.1': ['Combined heat and power system is to be introduced.'],
-  'oe 4.2': ['A solar PV system is to be installed at roof.'],
+  'oe 4.2': ['A total [XX]kW solar PV system is to be installed at roof. The system is to be installed facing due [XX] at a [XX] inclination.'],
   'oe 4.4': ['A geothermal system is introduced to the development.'],
   'oe 4.5': ['A total [XX]kW solar PV system is to be installed at roof. The system is to be installed facing due [XX] at a [XX] inclination.'],
   'ieq 1.1': [
