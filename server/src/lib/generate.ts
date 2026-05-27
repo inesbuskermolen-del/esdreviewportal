@@ -655,12 +655,29 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
     data: { hiddenFromPortal: true },
   })
 
-  // Un-hide credits that are no longer not-achieved (e.g. status was updated)
-  // Exclude innovation umbrella credits — they are intentionally hidden by generateInnovationLineItems
+  // Hide scoped-out credits from the reviewer portal, except OE 3.1
   await prisma.credit.updateMany({
     where: {
       projectId,
-      creditStatus: { not: 'N' },
+      creditStatus: 'ScopedOut',
+      deletedByGIW: false,
+      NOT: { creditId: { equals: 'OE 3.1', mode: 'insensitive' } },
+    },
+    data: { hiddenFromPortal: true },
+  })
+
+  // Ensure OE 3.1 scoped-out is visible in the reviewer portal
+  await prisma.credit.updateMany({
+    where: { projectId, creditStatus: 'ScopedOut', creditId: { equals: 'OE 3.1', mode: 'insensitive' } },
+    data: { hiddenFromPortal: false },
+  })
+
+  // Un-hide credits that are now achieved (not N or ScopedOut)
+  // Exclude innovation umbrella credits — intentionally hidden by generateInnovationLineItems
+  await prisma.credit.updateMany({
+    where: {
+      projectId,
+      creditStatus: { notIn: ['N', 'ScopedOut'] },
       hiddenFromPortal: true,
       NOT: { category: { contains: 'innovation', mode: 'insensitive' } },
     },

@@ -813,8 +813,8 @@ router.get('/:id/credits', async (req: Request, res: Response): Promise<void> =>
         projectId: req.params.id,
         deletedByGIW: false,
         hiddenFromPortal: false,
-        // Scoped-out and not-achieved credits are never shown to reviewers
-        creditStatus: { notIn: ['ScopedOut', 'N'] },
+        // Not-achieved credits are hidden; scoped-out visibility is managed via hiddenFromPortal
+        creditStatus: { not: 'N' },
         ...(searchTerm
           ? { responsibleParty: { contains: searchTerm, mode: 'insensitive' } }
           : {}),
