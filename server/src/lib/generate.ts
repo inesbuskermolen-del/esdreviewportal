@@ -316,6 +316,15 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
+    // OE 3.1 scoped-out: fixed annotation for CO sensor carpark ventilation
+    if (/^oe\s+3\.1$/i.test(credit.creditId.trim()) && credit.creditStatus === 'ScopedOut') {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'Carpark ventilation fans are to be controlled by CO sensors.' },
+      })
+      continue
+    }
+
     // OE 4.1, OE 4.4, IEQ 1.5, IEQ 1.6 scoped-out: mark as not targeted
     const NOT_TARGETED_SCOPED = new Set(['oe 4.1', 'oe 4.4', 'ieq 1.5', 'ieq 1.6'])
     if (NOT_TARGETED_SCOPED.has(credit.creditId.trim().toLowerCase()) && credit.creditStatus === 'ScopedOut') {
@@ -619,6 +628,7 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
   // Fixed-comment scoped-out credits: restore if previously deleted with no comment
   const fixedScopedComments: Array<{ pattern: RegExp; comment: string }> = [
     { pattern: /^iwm\s*3\.1$/i, comment: 'Landscape irrigation will be connected to the rainwater tank.' },
+    { pattern: /^oe\s*3\.1$/i,  comment: 'Carpark ventilation fans are to be controlled by CO sensors.' },
     { pattern: /^oe\s*4\.1$/i,  comment: 'Not targeted.' },
     { pattern: /^oe\s*4\.4$/i,  comment: 'Not targeted.' },
     { pattern: /^ieq\s*1\.5$/i, comment: 'Not targeted.' },
