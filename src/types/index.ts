@@ -18,6 +18,10 @@ export interface Project {
   generationStatus: string
   notifyEmail?: string | null
   gdft?: boolean
+  typology?: string | null
+  client?: string | null
+  architect?: string | null
+  totalDwellings?: number | null
   createdAt: string
   parentProjectId?: string | null
   reviewers?: ReviewerSummary[]

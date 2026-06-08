@@ -62,7 +62,6 @@ export default function NewProject() {
         data,
         {
           withCredentials: true,
-          headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: (event: AxiosProgressEvent) => {
             if (event.total) {
               const pct = Math.round((event.loaded / event.total) * 90)
@@ -76,10 +75,17 @@ export default function NewProject() {
       navigate(`/admin/projects/${res.data.projectId}`)
     } catch (err) {
       setPhase('error')
-      const msg =
-        axios.isAxiosError(err) && err.response?.data?.error
-          ? String(err.response.data.error)
-          : 'Upload failed. Please try again.'
+      let msg = 'Upload failed. Please try again.'
+      if (axios.isAxiosError(err)) {
+        if (err.response?.data?.error) {
+          msg = String(err.response.data.error)
+        } else if (err.response) {
+          msg = `Server error ${err.response.status}: ${err.response.statusText}`
+        } else if (err.request) {
+          msg = `No response from server (${err.code ?? 'network error'})`
+        }
+      }
+      console.error('[upload] error:', err)
       setError(msg)
     }
   }

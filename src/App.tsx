@@ -11,7 +11,7 @@ import ReviewSubmitted from '@/pages/ReviewSubmitted'
 
 export default function App() {
   return (
-    <BrowserRouter basename={import.meta.env.PROD ? import.meta.env.BASE_URL : '/'}>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <AuthProvider>
         <Routes>
           <Route path="/" element={<Navigate to="/admin" replace />} />

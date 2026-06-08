@@ -32,6 +32,9 @@ import {
   BLOCKED_INNOVATION_NAMES,
 } from '../lib/generate'
 import { exportProjectToExcel } from '../lib/export'
+import { generateSMPReport } from '../lib/report'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { ZipArchive } = require('archiver') as { ZipArchive: new (opts?: object) => import('archiver').Archiver }
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require('pdf-parse') as (
@@ -251,7 +254,11 @@ async function processUploadedPdf(projectId: string, trimmedText: string, origin
     "address": "string or null",
     "projectId": "string or null",
     "bessScore": number or null,
-    "date": "ISO date string or null"
+    "date": "ISO date string or null",
+    "typology": "Multi-Residential | Mixed-Use | Townhouse | Non-Residential | null",
+    "client": "string or null",
+    "architect": "string or null",
+    "totalDwellings": number or null
   },
   "credits": [
     {
@@ -276,6 +283,15 @@ async function processUploadedPdf(projectId: string, trimmedText: string, origin
 }
 
 Rules:
+- typology: classify as exactly one of the following based on what inputs the BESS assessment contains:
+  * "Mixed-Use" — assessment includes BOTH residential inputs (apartments or townhouses) AND non-residential inputs (retail, office, commercial, or other non-residential uses)
+  * "Multi-Residential" — assessment includes ONLY residential apartment inputs (no townhouses, no non-residential areas)
+  * "Townhouse" — assessment includes ONLY residential townhouse inputs (no apartments, no non-residential areas)
+  * "Non-Residential" — assessment includes NO residential inputs; only non-residential uses (retail, office, commercial, aged care, education, etc.)
+  * null if the building type cannot be determined from the PDF
+- client: the project client/owner name as stated in the PDF (cover page or project info section). Null if not stated.
+- architect: the architect firm or person's name as stated in the PDF. Null if not stated.
+- totalDwellings: total number of residential dwellings/apartments/units from the "Dwellings & Non-Residential Spaces" table (page 3 of BESS). This is the sum of all dwelling types (Studio, 1 Bed, 2 Bed, 3 Bed, etc.). Null if not a residential project or not stated.
 - creditStatus: Achieved → "Y", Not Achieved or 0% → "N", Scoped Out / N/A / Disabled → "ScopedOut"
 - EXCLUDE credits with status Disabled from the credits array entirely
 - creditRequirement: the specific compliance requirement for this credit as stated in the BESS document (e.g. "Provide a minimum of 24 long-stay bicycle spaces"). 1–2 sentences. Null if not stated.
@@ -305,6 +321,10 @@ ${trimmedText}`
       projectId?: string
       bessScore?: number
       date?: string
+      typology?: string
+      client?: string
+      architect?: string
+      totalDwellings?: number
     }
     credits: Array<{
       creditId: string
@@ -365,6 +385,10 @@ ${trimmedText}`
       projectId: parsed.project.projectId?.trim() || null,
       revision: revisionLabel,
       parentProjectId,
+      typology: parsed.project.typology?.trim() || null,
+      client: parsed.project.client?.trim() || null,
+      architect: parsed.project.architect?.trim() || null,
+      totalDwellings: parsed.project.totalDwellings != null ? parseInt(String(parsed.project.totalDwellings)) : null,
     },
   })
 
@@ -514,7 +538,7 @@ router.get('/:id', requireGIW, async (req: Request, res: Response): Promise<void
 /* PATCH /api/projects/:id */
 router.patch('/:id', requireGIW, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, address, bessScore, date, revision, projectId, generationStatus, notifyEmail, gdft } =
+    const { name, address, bessScore, date, revision, projectId, generationStatus, notifyEmail, gdft, typology, client, architect } =
       req.body as Partial<{
         name: string
         address: string
@@ -525,6 +549,9 @@ router.patch('/:id', requireGIW, async (req: Request, res: Response): Promise<vo
         generationStatus: string
         notifyEmail: string | null
         gdft: boolean
+        typology: string | null
+        client: string | null
+        architect: string | null
       }>
 
     const project = await prisma.project.update({
@@ -539,6 +566,9 @@ router.patch('/:id', requireGIW, async (req: Request, res: Response): Promise<vo
         ...(generationStatus !== undefined && { generationStatus }),
         ...(notifyEmail !== undefined && { notifyEmail: notifyEmail || null }),
         ...(gdft !== undefined && { gdft }),
+        ...(typology !== undefined && { typology: typology || null }),
+        ...(client !== undefined && { client: client || null }),
+        ...(architect !== undefined && { architect: architect || null }),
       },
     })
 
@@ -658,6 +688,68 @@ router.post('/:id/export', requireGIW, async (req: Request, res: Response): Prom
   } catch (err) {
     console.error('[export]', err)
     res.status(500).json({ error: 'Failed to generate export' })
+  }
+})
+
+/* POST /api/projects/:id/report — generate and download SMP Word + Excel ZIP */
+router.post('/:id/report', requireGIW, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: req.params.id },
+      select: {
+        name: true,
+        address: true,
+        projectId: true,
+        date: true,
+        revision: true,
+        typology: true,
+        client: true,
+        architect: true,
+        totalDwellings: true,
+      },
+    })
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    const credits = await prisma.credit.findMany({
+      where: { projectId: req.params.id, deletedByGIW: false },
+      select: { creditId: true, creditStatus: true, rawDataPoints: true, category: true },
+    })
+
+    const { client, architect, giwref } = req.body as { client?: string; architect?: string; giwref?: string }
+    const { wordBuffer, excelBuffer, wordFilename, excelFilename } = await generateSMPReport(
+      project,
+      credits,
+      { client, architect, giwref },
+    )
+
+    const safeName = project.name.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
+    const rev = project.revision ?? 'A'
+    const zipFilename = `SMP-Report-${safeName}-Rev${rev}.zip`
+
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${zipFilename}"`,
+    })
+
+    const archive = new ZipArchive({ zlib: { level: 6 } })
+    archive.on('error', (err) => {
+      console.error('[report] archiver error:', err)
+      if (!res.headersSent) res.status(500).end()
+    })
+    archive.pipe(res)
+    archive.append(wordBuffer, { name: wordFilename })
+    archive.append(excelBuffer, { name: excelFilename })
+    await archive.finalize()
+  } catch (err: unknown) {
+    const e = err as Error
+    console.error('[report]', e)
+    if (!res.headersSent) {
+      const status = e.message?.includes('not yet available') || e.message?.includes('not set') || e.message?.includes('Unknown typology') ? 422 : 500
+      res.status(status).json({ error: e.message ?? 'Failed to generate report' })
+    }
   }
 })
 

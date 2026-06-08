@@ -20,6 +20,10 @@ model Project {
   notifyEmail      String?
   createdAt        DateTime @default(now())
   gdft             Boolean  @default(false)
+  typology         String?
+  client           String?
+  architect        String?
+  totalDwellings   Int?
   parentProjectId  String?
   parent           Project?  @relation("ProjectRevisions", fields: [parentProjectId], references: [id])
   revisions        Project[] @relation("ProjectRevisions")

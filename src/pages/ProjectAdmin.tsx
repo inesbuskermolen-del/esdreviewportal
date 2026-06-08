@@ -224,6 +224,11 @@ export default function ProjectAdmin() {
   }
 
   const [changelogLoading, setChangelogLoading] = useState(false)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+  const [reportGiwref, setReportGiwref] = useState('')
+  const [reportClient, setReportClient] = useState('')
+  const [reportArchitect, setReportArchitect] = useState('')
 
   async function handleChangelog() {
     if (!id) return
@@ -246,6 +251,47 @@ export default function ProjectAdmin() {
       alert('Changelog not available — this may be the first revision.')
     } finally {
       setChangelogLoading(false)
+    }
+  }
+
+  function handleGenerateReport() {
+    setReportGiwref('GIW')
+    setReportClient(project?.client ?? '')
+    setReportArchitect(project?.architect ?? '')
+    setReportModalOpen(true)
+  }
+
+  async function submitReport() {
+    if (!id) return
+    setReportModalOpen(false)
+    setReportLoading(true)
+    try {
+      const res = await axios.post(
+        `/api/projects/${id}/report`,
+        { giwref: reportGiwref.trim(), client: reportClient.trim(), architect: reportArchitect.trim() },
+        { withCredentials: true, responseType: 'blob' },
+      )
+      const blob = new Blob([res.data as BlobPart], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `SMP-Report-${project?.name ?? 'project'}-Rev${project?.revision ?? 'A'}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response) {
+        const text = await (err.response.data as Blob).text()
+        try {
+          const parsed = JSON.parse(text) as { error?: string }
+          alert(parsed.error ?? 'Failed to generate report.')
+        } catch {
+          alert('Failed to generate report.')
+        }
+      } else {
+        alert('Failed to generate report. Please try again.')
+      }
+    } finally {
+      setReportLoading(false)
     }
   }
 
@@ -654,6 +700,14 @@ export default function ProjectAdmin() {
                 {genStatus === 'running' ? 'Regenerating…' : 'Regenerate Comments'}
               </button>
 
+              <button
+                className="btn-primary w-full"
+                onClick={handleGenerateReport}
+                disabled={reportLoading}
+              >
+                {reportLoading ? 'Generating…' : 'Generate Report'}
+              </button>
+
               {/* Generation status indicator */}
               <div className="flex items-center gap-2 pt-1">
                 {genStatus === 'idle' && (
@@ -799,6 +853,74 @@ export default function ProjectAdmin() {
           <DrawingRequirementsTab items={drawingItems} />
         )}
       </main>
+
+      {/* Report details modal */}
+      {reportModalOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setReportModalOpen(false) }}
+        >
+          <div className="giw-card" style={{ width: '400px', maxWidth: '90vw' }}>
+            <p style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '16px', fontWeight: 600, color: '#2C2C2C', marginBottom: '20px' }}>
+              Generate SMP Report
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', display: 'block', marginBottom: '4px' }}>
+                  GIW Reference
+                </label>
+                <input
+                  type="text"
+                  value={reportGiwref}
+                  onChange={(e) => setReportGiwref(e.target.value)}
+                  placeholder="e.g. GIW-2024-001"
+                  className="giw-input w-full"
+                  style={{ fontFamily: 'Open Sans, sans-serif' }}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', display: 'block', marginBottom: '4px' }}>
+                  Client
+                </label>
+                <input
+                  type="text"
+                  value={reportClient}
+                  onChange={(e) => setReportClient(e.target.value)}
+                  placeholder="Client name"
+                  className="giw-input w-full"
+                  style={{ fontFamily: 'Open Sans, sans-serif' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', display: 'block', marginBottom: '4px' }}>
+                  Architect
+                </label>
+                <input
+                  type="text"
+                  value={reportArchitect}
+                  onChange={(e) => setReportArchitect(e.target.value)}
+                  placeholder="Architect name"
+                  className="giw-input w-full"
+                  style={{ fontFamily: 'Open Sans, sans-serif' }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitReport() }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
+              <button className="btn-primary" style={{ flex: 1 }} onClick={submitReport}>
+                Generate
+              </button>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setReportModalOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

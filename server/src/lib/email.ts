@@ -1,10 +1,14 @@
 import { Resend } from 'resend'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
-const FROM = process.env.SMTP_FROM || 'GIW Environmental Solutions <onboarding@resend.dev>'
+let _resend: Resend | null = null
+function getResend(): Resend {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY ?? '')
+  return _resend
+}
 
 async function send(to: string | string[], subject: string, html: string, attachments?: Array<{ filename: string; content: Buffer; contentType: string }>) {
-  const { error } = await resend.emails.send({
+  const FROM = process.env.SMTP_FROM || 'GIW Environmental Solutions <onboarding@resend.dev>'
+  const { error } = await getResend().emails.send({
     from: FROM,
     to: Array.isArray(to) ? to : [to],
     subject,
