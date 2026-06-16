@@ -29,26 +29,19 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
   'iwm 4.1': [
     '80% of fire system test water (e.g. hydrant pump test water or SCV annubar test) is to be reused on-site, either within the fire system or directed into the rainwater tank OR fire test water system does not expel water.',
   ],
-  'oe 1.1': [
-    'GIW has undertaken a preliminary facade assessment in accordance with NCC2022 Section J4D6 and recommend the application of the DtS pathway for Section J compliance.',
-    'GIW has undertaken a preliminary facade assessment in accordance with NCC2022 Section J4D6 and recommend the application of the J1V3 pathway for Section J compliance. This will be undertaken during the DD stage.',
-  ],
-  'oe 1.2': [
-    'The energy ratings are to achieve a [XX] Star average with no unit below 6 Stars and no unit exceeding the maximum allowed cooling loads as outlined under BADS.',
-  ],
   'oe 2.1': ['Refer credit OE2.7 Energy Consumption'],
   'oe 2.2': ['>10% peak energy demand reduction is achieved.'],
   'oe 2.6': ['The development is all electric with induction cooktops and no gas connection.'],
   'oe 2.7': [
-    '• Apartment HVAC systems are to be within one star of the best available unit of the same capacity.\n• Commercial HVAC systems are to have a COP of 3.4.',
+    'HVAC systems to have an Energy Efficiency Ratios (EER) not less than 85% of the EER of the most efficient equivalent unit available (type & capacity). Where VRV / VRF systems are proposed, a minimum COP of 3.4 is required.',
   ],
   'oe 3.1': ['Carpark ventilation fans are to be controlled by CO sensors.'],
   'oe 3.2': ['Centralised heat pump hot water system or individual electric instantaneous hot water systems. Please confirm?'],
   'oe 3.3': ['Operation of min. 50% of external lighting is controlled by a motion detector.'],
   'oe 3.4': ['[Individual / shared] clothes drying lines are to be introduced to the development.'],
   'oe 3.5': ['Maximum illumination power density for each dwelling is 4W/sqm or less.'],
-  'oe 3.6': ['Maximum illumination power density for each dwelling is 4W/sqm or less.'],
-  'oe 3.7': ['Maximum illumination power density (W/sqm) of the relevant building class is at least 20% lower than current NCC requirements.'],
+  'oe 3.6': ['Lighting power density shall be as follows:\n• Dwellings: No greater than average 4W/m2\n• POS: No greater than average 3.2W/m2\n• Back of house and indoor car parks: No greater than average 1.6W/m2'],
+  'oe 3.7': ['Lighting power density shall be as follows:\n• Retail: No greater than average 14W/m2\n• Office: No greater than average 4.5W/m2'],
   'oe 4.1': ['Combined heat and power system is to be introduced.'],
   'oe 4.2': ['A total [XX]kW solar PV system is to be installed at roof. The system is to be installed facing due [XX] at a [XX] inclination.'],
   'oe 4.4': ['A geothermal system is introduced to the development.'],
@@ -78,11 +71,7 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
   'ieq 3.2': ['We recommend to add additional shading to the following areas:\n• [XX]\n• [XX]'],
   'ieq 3.4': ['We recommend to add additional shading to the following areas:\n• [XX]\n• [XX]'],
   'ieq 3.5': ['Ceiling fans are to be provided to [XX]% of the tenancies.'],
-  'ieq 4.1': [
-    'Low VOC products are to be used internally.',
-    'Low VOC carpets are to be used internally.',
-    'Low formaldehyde products are to be used internally.',
-  ],
+  'ieq 4.1': ['Low VOC and / or formaldehyde products are to be used internally.'],
   'transport 1.1': ['[XX] secure bicycle spaces for residents.'],
   'transport 1.2': ['[XX] bicycle spaces for residential visitors.'],
   'transport 1.3': ['The majority of the residential bicycle parking spaces are located at ground or entry level.'],
@@ -93,7 +82,7 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
   'transport 2.2': ['A formal car sharing scheme is integrated into the development.'],
   'transport 2.3': ['[XX] motor bike spaces are provided within the development.', 'Min. [XX]% of vehicle parking spaces are designated and labelled for motorbikes/mopeds.'],
   'waste 1.1': ['>30% of the existing development is re-used.'],
-  'waste 2.1': ['Organic waste will be provided within the basement bin room.'],
+  'waste 2.1': ['Organic waste will be provided within the dedicated bin area.'],
   'waste 2.2': ['Annotate separate general, recycling, glass and green waste bins at bin area.'],
   'urban ecology 1.1': ['Min. [XX]m2 of communal space (currently satisfied).'],
   'urban ecology 2.1': ['[XX]% of the site area is provided with vegetation.'],
@@ -267,44 +256,56 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
-    // OE 1.1 special case: if the Non-residential buildings profile contains NLA values
-    // that are not the BESS defaults (1,000 / 10,000), J1V3 modelling has been run.
-    if (/^oe\s+1\.1$/i.test(credit.creditId.trim()) && credit.rawDataPoints) {
-      // Extract standalone integers/decimals that look like area values (100–999,999)
-      // and are not percentages (exclude numbers followed by %)
-      const areaNumbers = [...credit.rawDataPoints.matchAll(/\b(\d{1,3}(?:,\d{3})*|\d+(?:\.\d+)?)\b(?!\s*%)/g)]
+    // OE 3.7 special case: show only the space types present in the BESS assessment
+    if (/^oe\s+3\.7$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
+      const hasRetail = /\bretail\b|\bshop\b/i.test(allRaw)
+      const hasOffice = /\boffice\b/i.test(allRaw)
+      const lines: string[] = ['Lighting power density shall be as follows:']
+      if (hasRetail) lines.push('• Retail: No greater than average 14W/m2')
+      if (hasOffice) lines.push('• Office: No greater than average 4.5W/m2')
+      // Fall back to both if neither detected
+      if (!hasRetail && !hasOffice) {
+        lines.push('• Retail: No greater than average 14W/m2')
+        lines.push('• Office: No greater than average 4.5W/m2')
+      }
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: lines.join('\n') },
+      })
+      continue
+    }
+
+    // OE 2.6 special case
+    if (/^oe\s+2\.6$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const oe11 = credits.find(c => /^oe\s+1\.1$/i.test(c.creditId.trim()))
+      const raw = oe11?.rawDataPoints ?? ''
+
+      // Detect office-only buildings (non-default NLA, mentions office, no retail/residential)
+      const areaNumbers = [...raw.matchAll(/\b(\d{1,3}(?:,\d{3})*|\d+(?:\.\d+)?)\b(?!\s*%)/g)]
         .map(m => parseFloat(m[1].replace(/,/g, '')))
         .filter(n => !isNaN(n) && n >= 100 && n <= 999999)
       const hasNonDefaultNLA = areaNumbers.some(n => n !== 1000 && n !== 10000)
-      if (hasNonDefaultNLA) {
-        await prisma.credit.update({
-          where: { id: credit.id },
-          data: { commentsGIW: 'Preliminary J1V3 modelling has been undertaken and the development is achieving Section J compliance.' },
-        })
-        continue
-      }
-    }
+      const mentionsOffice = /\boffice\b/i.test(raw)
+      const mentionsOtherUse = /\bretail\b|\bresidential\b|\bdwelling\b|\bapartment\b|\bshop\b/i.test(raw)
+      const isOfficeOnly = hasNonDefaultNLA && mentionsOffice && !mentionsOtherUse
 
-    // OE 2.6 special case: office-only non-residential buildings should not mention
-    // induction cooktops — detect via OE 1.1's rawDataPoints having non-default NLA
-    // values that reference office but no residential/retail use types.
-    if (/^oe\s+2\.6$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
-      const oe11 = credits.find(c => /^oe\s+1\.1$/i.test(c.creditId.trim()))
-      if (oe11?.rawDataPoints) {
-        const areaNumbers = [...oe11.rawDataPoints.matchAll(/\b(\d{1,3}(?:,\d{3})*|\d+(?:\.\d+)?)\b(?!\s*%)/g)]
-          .map(m => parseFloat(m[1].replace(/,/g, '')))
-          .filter(n => !isNaN(n) && n >= 100 && n <= 999999)
-        const hasNonDefaultNLA = areaNumbers.some(n => n !== 1000 && n !== 10000)
-        const mentionsOffice = /\boffice\b/i.test(oe11.rawDataPoints)
-        const mentionsOtherUse = /\bretail\b|\bresidential\b|\bdwelling\b|\bapartment\b|\bshop\b/i.test(oe11.rawDataPoints)
-        if (hasNonDefaultNLA && mentionsOffice && !mentionsOtherUse) {
-          await prisma.credit.update({
-            where: { id: credit.id },
-            data: { commentsGIW: 'The development will be all electric with no gas connection.' },
-          })
-          continue
-        }
-      }
+      // Detect retail component across all credits' rawDataPoints
+      const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
+      const hasRetail = /\bretail\b|\bshop\b/i.test(allRaw)
+      const retailSuffix = hasRetail
+        ? ' Please confirm if retail requires a gas cooktop? Note that this will have a significant negative impact on the BESS score.'
+        : ''
+
+      const base = isOfficeOnly
+        ? 'The development will be all electric with no gas connection.'
+        : 'The development is all electric with induction cooktops and no gas connection.'
+
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: base + retailSuffix },
+      })
+      continue
     }
 
     // IWM 3.1 scoped-out: fixed annotation confirming rainwater tank connection
@@ -325,8 +326,29 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
-    // OE 4.1, OE 4.4, IEQ 1.5, IEQ 1.6 scoped-out: mark as not targeted
-    const NOT_TARGETED_SCOPED = new Set(['oe 4.1', 'oe 4.4', 'ieq 1.5', 'ieq 1.6'])
+    // Management 3.2 / 3.3 scoped-out: single commercial tenancy
+    if (/^management\s+3\.[23]$/i.test(credit.creditId.trim()) && credit.creditStatus === 'ScopedOut') {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'N/A - only one commercial tenancy.' },
+      })
+      continue
+    }
+
+    // OE 1.1 / OE 1.2: always mark as achieved
+    if (/^oe\s+1\.[12]$/i.test(credit.creditId.trim())) {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'Achieved.' },
+      })
+      continue
+    }
+
+    // IEQ 1.5 / 1.6 scoped-out: hide from admin panel (leave comment null so soft-delete fires)
+    if (/^ieq\s+1\.[56]$/i.test(credit.creditId.trim()) && credit.creditStatus === 'ScopedOut') continue
+
+    // OE 4.x scoped-out: mark as not targeted
+    const NOT_TARGETED_SCOPED = new Set(['oe 4.1', 'oe 4.2', 'oe 4.4', 'oe 4.5'])
     if (NOT_TARGETED_SCOPED.has(credit.creditId.trim().toLowerCase()) && credit.creditStatus === 'ScopedOut') {
       await prisma.credit.update({
         where: { id: credit.id },
@@ -356,7 +378,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       ).join('\n\n')
 
       const systemPrompt =
-        'You are a text completion function. Output ONLY the completed template — nothing else. Zero preamble, zero explanation, zero reasoning, zero trailing notes. Start your response with the exact first character of the chosen template. Never write "I", "Based on", "Looking at", "Note", "Option", or any commentary. If choosing between options, output the chosen option text only, not its label.'
+        'You are a text completion function. Output ONLY the completed template — nothing else. Zero preamble, zero explanation, zero reasoning, zero trailing notes. Start your response with the exact first character of the chosen template. Never write "I", "Based on", "Looking at", "Note", "Option", or any commentary. If choosing between options, output the chosen option text only, not its label. Always use "retail" instead of "shop".'
 
       const userPrompt = `Project data:\n${credit.rawDataPoints ?? 'No specific data recorded.'}\nStatus: ${credit.creditStatus}   Score: ${credit.creditScore != null ? `${credit.creditScore}%` : 'N/A'}\n\n${templates.length > 1 ? `Choose the single most appropriate option and fill its [placeholders] with values from the project data. Output the chosen option text only:\n\n${templateList}` : `Fill every [placeholder] in this template with the matching value from the project data. If a specific value is not in the data, leave the placeholder as-is:\n\n${templateList}`}`
 
@@ -388,7 +410,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     } else {
       // No template: write a short factual comment, max 150 characters
       const systemPrompt =
-        'You are writing a concise factual note for a BESS building assessment. Output only the comment text — no preamble, no reasoning, no first-person, no "Based on", no "Looking at". Start directly with the fact. Maximum 150 characters.'
+        'You are writing a concise factual note for a BESS building assessment. Output only the comment text — no preamble, no reasoning, no first-person, no "Based on", no "Looking at". Start directly with the fact. Maximum 150 characters. Always use "retail" instead of "shop".'
 
       const userPrompt = `Write a factual one-line comment for this BESS credit. Start with the key fact from the project data.\nStatus: ${credit.creditStatus}   Score: ${credit.creditScore != null ? `${credit.creditScore}%` : 'N/A'}\nProject data: ${credit.rawDataPoints ?? 'No specific data recorded.'}\nIf ScopedOut, briefly note what is outside scope. Max 150 characters.`
 
@@ -441,6 +463,7 @@ export async function generateExcellenceOpportunities(projectId: string): Promis
     const id = c.creditId.toLowerCase().trim()
     if (c.creditStatus === 'ScopedOut') return false
     if (c.creditScore != null && c.creditScore >= 100) return false
+    if (c.creditScore === 0) return false
     if (EXCELLENCE_EXCLUDED.some((ex) => id === ex || id.startsWith(ex + ' ') || c.category.toLowerCase().includes('innovation'))) return false
     return true
   })
@@ -465,12 +488,16 @@ Score thresholds (include only if relevant):
 - OE 4.5 Solar Townhouses: min 30% for any points, 100% for maximum
 - IEQ 1.1 Daylight Living: 66% credit score when 80% of areas pass, 100% when 100% pass
 - IEQ 1.2 Daylight Bedrooms: 66% credit score when 80% of bedrooms pass, 100% when 100% pass
-- IEQ 2.1 Natural Ventilation: 66% credit score when 60% of apartments pass, 100% when 100% pass
+- IEQ 2.1 Natural Ventilation: 66% credit score when 60% of apartments pass, 100% when 100% pass. This can be achieved through the introduction of mechanically assisted natural ventilation to non-cross ventilated apartments.
 - IEQ 3.2 Thermal Comfort: continuous — score increases proportionally from 33%
 - IEQ 3.4 Noise: 66% credit score when 50% of areas achieve target, 100% when 100% achieve target
 - IEQ 1.4 Daylight Commercial: maximum achievable score is 60% — do not suggest exceeding this
-- IWM 1.1 Potable Water: continuous — score increases proportionally with % reduction
-- Urban Ecology 2.1: tiers at >5%, >10%, >20%, >30% of site area
+- IWM 1.1 Potable Water: continuous — score increases proportionally with % reduction. Pathways to improve: increase WELS star ratings on fixtures, connect toilets to rainwater/recycled water (if not already), connect landscape irrigation to rainwater/recycled water (if not already)
+- Urban Ecology 2.1: 25% credit score at >5% site area, 50% at >10%, 75% at >20%, 100% at >30%
+- OE 3.4 Clothes Drying: suggest individual clothes lines (per dwelling) or communal clothes lines, only if not already targeted in the project data
+- Transport 2.1 EV Charging: minimum 1 EV charging station must be installed at practical completion to claim full points
+- Urban Ecology 2.2 Green Roof: Significant planters at roof or large terraces can be claimed as green roofs.
+- Urban Ecology 2.3 Green Wall: This can be creepers, green wall systems or hanging plants cascading down.
 - Innovation 1.1: 1 point per confirmed initiative, 10 points max
 
 Write exactly 1 sentence describing the specific action needed to improve this credit, with the exact threshold or target value. Do not mention the current score. Do not mention the credit weight. Do not add extra sentences. Keep the response under 150 characters.`
@@ -480,7 +507,7 @@ Write exactly 1 sentence describing the specific action needed to improve this c
         model: 'claude-sonnet-4-6',
         max_tokens: 150,
         system:
-          'You are an ESD consultant writing concise improvement notes for a BESS assessment. Be specific — cite actual numbers and thresholds from the project data. No generic advice. No AI references. One sentence only, under 150 characters: describe the specific improvement needed with an exact number or target. Never mention credit weights.',
+          'You are an ESD consultant writing concise improvement notes for a BESS assessment. Be specific — cite actual numbers and thresholds from the project data. No generic advice. No AI references. One sentence only, under 150 characters: describe the specific improvement needed with an exact number or target. Never mention credit weights. Always use "retail" instead of "shop".',
         messages: [{ role: 'user', content: userPrompt }],
       })
 
@@ -627,12 +654,12 @@ export async function generateInnovationLineItems(projectId: string): Promise<vo
 export async function applyAutoVisibilityRules(projectId: string): Promise<void> {
   // Fixed-comment scoped-out credits: restore if previously deleted with no comment
   const fixedScopedComments: Array<{ pattern: RegExp; comment: string }> = [
-    { pattern: /^iwm\s*3\.1$/i, comment: 'Landscape irrigation will be connected to the rainwater tank.' },
-    { pattern: /^oe\s*3\.1$/i,  comment: 'Carpark ventilation fans are to be controlled by CO sensors.' },
-    { pattern: /^oe\s*4\.1$/i,  comment: 'Not targeted.' },
-    { pattern: /^oe\s*4\.4$/i,  comment: 'Not targeted.' },
-    { pattern: /^ieq\s*1\.5$/i, comment: 'Not targeted.' },
-    { pattern: /^ieq\s*1\.6$/i, comment: 'Not targeted.' },
+    { pattern: /^iwm\s*3\.1$/i,          comment: 'Landscape irrigation will be connected to the rainwater tank.' },
+    { pattern: /^oe\s*1\.[12]$/i,         comment: 'Achieved.' },
+    { pattern: /^oe\s*3\.1$/i,           comment: 'Carpark ventilation fans are to be controlled by CO sensors.' },
+    { pattern: /^oe\s*4\.[124]$/i,        comment: 'Not targeted.' },
+    { pattern: /^oe\s*4\.5$/i,           comment: 'Not targeted.' },
+    { pattern: /^management\s*3\.[23]$/i, comment: 'N/A - only one commercial tenancy.' },
   ]
   const scopedCredits = await prisma.credit.findMany({
     where: { projectId, creditStatus: 'ScopedOut' },

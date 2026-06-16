@@ -1193,7 +1193,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                     <td className="py-2 pr-4 text-sm" style={{ color: '#555' }}>
                       {credit.responsibleParty ?? '—'}
                     </td>
-                    <td className="py-2 pr-5" style={{ minWidth: '220px' }}>
+                    <td className="py-2 pr-5" style={{ minWidth: '440px' }}>
                       {credit.creditStatus === 'ScopedOut' && !giwComments[credit.id]?.trim() ? (
                         <span style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', fontStyle: 'italic' }}>
                           Not targeted
