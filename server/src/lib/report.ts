@@ -339,7 +339,7 @@ For the [XX] values in document order, the contexts are:
 1. apartments count (in "will include [XX] apartments") — look in OE 2.x rawDataPoints (the dwelling profile / "Dwellings & Non-Residential Spaces" table). Find the total dwelling count, e.g. "80 apartments" or sum of bedroom type counts.
 2. retail tenancies count — from OE 2.x dwelling profile rawDataPoints
 3. commercial/office tenancies count — from OE 2.x dwelling profile rawDataPoints (office and commercial are equivalent)
-4. number of levels/storeys — from the Building table at the start of the BESS PDF (the "Height" or "Storeys" field). Look in OE 1.x or OE 2.x rawDataPoints for patterns like "8 storeys", "8 levels", "8 floors", "Number of Storeys: 8". Return just the number (e.g. "8").
+4. number of levels/storeys — search ALL credits' rawDataPoints AND the project name for patterns like "8 storeys", "8 levels", "8 floors", "8-storey", "8-level", "Number of Storeys: 8", "Height: 8 levels", "over 8 levels", "across 8 floors". Also check the project name itself (e.g. "12-Storey Mixed Use"). Return just the number (e.g. "8").
 5. 1-bedroom apartments count — look in OE 2.x rawDataPoints for bedroom breakdown (e.g. "20 x 1BR", "20 x 1 bedroom", "20 x 1-bedroom apartments")
 6. 2-bedroom apartments count — same source as #5
 7. 3-bedroom apartments count — same source as #5
@@ -680,15 +680,17 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
     // Include project name in search — BESS PDF often names the project "8 Storey Residential"
     const searchCorpus = (project.name ?? '') + ' ' + credits.map(c => c.rawDataPoints ?? '').join(' ')
     const levelsMatch =
-      searchCorpus.match(/(\d+)\s*(?:storey|storeys|level|levels|floor|floors)\b/i)
+      searchCorpus.match(/(\d+)\s*[-–]?\s*(?:storey|storeys|level|levels|floor|floors)\b/i)
       ?? searchCorpus.match(/(?:number of (?:storeys?|levels?|floors?)[:\s]+)(\d+)/i)
       ?? searchCorpus.match(/(?:height|building)[^:\n]*:\s*(?:[\d.]+ ?m[,\s]+)?(\d+)[\s-]?(?:storey|level|floor)/i)
       ?? searchCorpus.match(/(\d+)[\s-](?:storey|level|floor)\s+(?:building|development|residential|mixed)/i)
+      ?? searchCorpus.match(/(?:over|across|spanning)\s+(\d+)\s+(?:storey|storeys|level|levels|floor|floors)/i)
+      ?? searchCorpus.match(/(?:storey|storeys|level|levels|floor|floors)[:\s]+(\d+)/i)
     const val = levelsMatch?.[1] ?? null
 
     if (val !== null) {
-      // Paragraph-level replacement for "constructed over [XX]" / "comprising [XX]"
-      const levelsKws = ['constructed over', 'comprising']
+      // Paragraph-level replacement for level-related context keywords
+      const levelsKws = ['constructed over', 'comprising', 'spanning', 'across', 'over [XX]', 'of [XX]']
       xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
         const texts: string[] = []
         const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
