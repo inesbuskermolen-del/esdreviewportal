@@ -460,28 +460,29 @@ export default function ReviewMatrix() {
               </div>
             ) : (
               <div style={{ borderRadius: '4px', border: '1px solid #C0C0C0' }}>
-                <table style={{ borderCollapse: 'collapse', width: '100%', backgroundColor: '#fff', fontSize: '13px', fontFamily: 'Open Sans, sans-serif' }}>
+                <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%', backgroundColor: '#fff', fontSize: '13px', fontFamily: 'Open Sans, sans-serif' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#00602B' }}>
-                      {[
+                      {([
                         ['Credit Name', 200],
-                        ['Credit Requirement', 220],
-                        ['Mandatory', 70],
-                        ['Responsible Party', 150],
-                        ...(isGIW ? [['Credit Score', 80], ['Credit Weight', 80]] as [string, number][] : []),
-                        ['Comments GIW', 440],
-                        ['Comments Project Team', 260],
-                      ].map(([label, w], i) => (
+                        ['Credit Requirement', 180],
+                        ['Mandatory', 60],
+                        ['Responsible Party', 110],
+                        ...(isGIW ? [['Credit Score', 65], ['Credit Weight', 65]] as [string, number][] : []),
+                        ['Comments GIW', 240],
+                        ['Comments Project Team', 0],
+                      ] as [string, number][]).map(([label, w], i) => (
                         <th
                           key={i}
                           style={{
                             fontFamily: 'Montserrat, sans-serif', fontSize: '12px', fontWeight: 500,
                             color: '#fff', textTransform: 'uppercase', padding: '8px 12px',
-                            textAlign: 'left', whiteSpace: 'nowrap', minWidth: w as number,
+                            textAlign: 'left', whiteSpace: 'nowrap',
+                            ...(w > 0 ? { width: w } : {}),
                             ...(i === 0 ? { position: 'sticky', left: 0, zIndex: 2, backgroundColor: '#00602B' } : {}),
                           }}
                         >
-                          {label as string}
+                          {label}
                         </th>
                       ))}
                     </tr>
@@ -658,7 +659,7 @@ function CreditRow({
       style={{ backgroundColor: rowBg, transition: 'background-color 0.1s' }}
     >
       {/* Credit Name — sticky */}
-      <td style={{ ...tdBase, position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1, minWidth: 200 }}>
+      <td style={{ ...tdBase, position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1 }}>
         <span style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '13px', fontWeight: 500, color: '#2C2C2C' }}>
           {credit.creditId} {credit.creditName}
         </span>
@@ -689,7 +690,7 @@ function CreditRow({
       )}
 
       {/* Comments GIW */}
-      <td style={{ ...tdBase, minWidth: 220 }}>
+      <td style={{ ...tdBase }}>
         {isGIW ? (
           <div style={{ position: 'relative' }}>
             <textarea
@@ -715,7 +716,7 @@ function CreditRow({
       </td>
 
       {/* Comments Project Team */}
-      <td style={{ ...tdBase, minWidth: 260 }}>
+      <td style={{ ...tdBase }}>
         {isGIW ? (
           <p style={{ fontSize: '12px', color: '#2C2C2C', margin: 0, whiteSpace: 'pre-wrap' }}>{teamCommentForGIW}</p>
         ) : (
@@ -773,7 +774,7 @@ function CreditRow({
 function RequirementCell({ requirement }: { requirement?: string | null }) {
   const text = requirement ?? ''
   return (
-    <td style={{ ...tdBase, color: '#C0C0C0', fontSize: '12px', minWidth: 220 }}>
+    <td style={{ ...tdBase, color: '#C0C0C0', fontSize: '12px' }}>
       {text}
     </td>
   )

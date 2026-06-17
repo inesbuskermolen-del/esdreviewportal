@@ -1092,51 +1092,49 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
   const groups = groupByCategory(credits)
 
   return (
-    <div className="space-y-6">
-      {groups.map((group) => (
-        <div key={group.order} className="giw-card p-0 overflow-hidden">
-          <div style={{ overflowX: 'auto' }}>
-          <div
+    <div className="giw-card p-0 overflow-hidden">
+      <table className="text-sm" style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr
             style={{
-              backgroundColor: '#C8E6D4',
-              padding: '10px 20px',
               borderBottom: '1px solid #C0C0C0',
+              backgroundColor: '#FFFFFF',
+              fontFamily: 'Montserrat, sans-serif',
+              fontSize: '11px',
+              color: '#C0C0C0',
             }}
           >
-            <p
-              style={{
-                fontFamily: 'Montserrat, sans-serif',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#004D22',
-              }}
-            >
-              {group.category}
-            </p>
-          </div>
-          <table className="text-sm" style={{ tableLayout: 'auto', width: '100%', minWidth: '100%' }}>
-            <thead>
-              <tr
-                style={{
-                  borderBottom: '1px solid #C0C0C0',
-                  backgroundColor: '#FFFFFF',
-                  fontFamily: 'Montserrat, sans-serif',
-                  fontSize: '11px',
-                  color: '#C0C0C0',
-                }}
-              >
-                <th className="text-left py-2 px-5 font-medium w-28">ID</th>
-                <th className="text-left py-2 pr-4 font-medium">Credit</th>
-                <th className="text-left py-2 pr-4 font-medium">Requirement</th>
-                <th className="text-left py-2 pr-4 font-medium w-28">Status</th>
-                <th className="text-left py-2 pr-4 font-medium w-16">Score</th>
-                <th className="text-left py-2 pr-4 font-medium w-16">Weight</th>
-                <th className="text-left py-2 pr-4 font-medium w-20">Mandatory</th>
-                <th className="text-left py-2 pr-4 font-medium">Responsible Party</th>
-                <th className="text-left py-2 pr-5 font-medium" style={{ minWidth: '440px' }}>Comments GIW</th>
+            <th className="text-left py-2 px-5 font-medium" style={{ width: '70px' }}>ID</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '120px' }}>Credit</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '160px' }}>Requirement</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '90px' }}>Status</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '50px' }}>Score</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '55px' }}>Weight</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '65px' }}>Mandatory</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '110px' }}>Responsible Party</th>
+            <th className="text-left py-2 pr-5 font-medium">Comments GIW</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((group) => (
+            <>
+              <tr key={`cat-${group.order}`}>
+                <td
+                  colSpan={9}
+                  style={{
+                    backgroundColor: '#C8E6D4',
+                    padding: '10px 20px',
+                    borderBottom: '1px solid #C0C0C0',
+                    borderTop: '1px solid #C0C0C0',
+                    fontFamily: 'Montserrat, sans-serif',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#004D22',
+                  }}
+                >
+                  {group.category}
+                </td>
               </tr>
-            </thead>
-            <tbody>
               {group.items.map((credit) => {
                 const style = creditStatusStyle(credit.creditStatus)
                 return (
@@ -1156,7 +1154,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                       {credit.creditId}
                     </td>
                     <td className="py-2 pr-4 text-sm">{credit.creditName}</td>
-                    <td className="py-2 pr-4 text-sm" style={{ color: '#555', maxWidth: '260px' }}>
+                    <td className="py-2 pr-4 text-sm" style={{ color: '#555' }}>
                       {credit.creditRequirement ?? '—'}
                     </td>
                     <td className="py-2 pr-4">
@@ -1194,7 +1192,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                     <td className="py-2 pr-4 text-sm" style={{ color: '#555' }}>
                       {credit.responsibleParty ?? '—'}
                     </td>
-                    <td className="py-2 pr-5" style={{ minWidth: '440px' }}>
+                    <td className="py-2 pr-5">
                       {credit.creditStatus === 'ScopedOut' && !giwComments[credit.id]?.trim() ? (
                         <span style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', fontStyle: 'italic' }}>
                           Not targeted
@@ -1223,11 +1221,10 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                   </tr>
                 )
               })}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      ))}
+            </>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
