@@ -1095,6 +1095,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
     <div className="space-y-6">
       {groups.map((group) => (
         <div key={group.order} className="giw-card p-0 overflow-hidden">
+          <div style={{ overflowX: 'auto' }}>
           <div
             style={{
               backgroundColor: '#C8E6D4',
@@ -1113,7 +1114,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
               {group.category}
             </p>
           </div>
-          <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+          <table className="text-sm" style={{ tableLayout: 'auto', width: '100%', minWidth: '100%' }}>
             <thead>
               <tr
                 style={{
@@ -1224,6 +1225,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
               })}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
     </div>

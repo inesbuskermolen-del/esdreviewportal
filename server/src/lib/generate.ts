@@ -29,6 +29,13 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
   'iwm 4.1': [
     '80% of fire system test water (e.g. hydrant pump test water or SCV annubar test) is to be reused on-site, either within the fire system or directed into the rainwater tank OR fire test water system does not expel water.',
   ],
+  'oe 1.1': [
+    'GIW has undertaken a preliminary facade assessment in accordance with NCC2022 Section J4D6 and recommend the application of the DtS pathway for Section J compliance.',
+    'GIW has undertaken a preliminary facade assessment in accordance with NCC2022 Section J4D6 and recommend the application of the J1V3 pathway for Section J compliance. This will be undertaken during the DD stage.',
+  ],
+  'oe 1.2': [
+    'The energy ratings are to achieve a [XX] Star average with no unit below 6 Stars and no unit exceeding the maximum allowed cooling loads as outlined under BADS.',
+  ],
   'oe 2.1': ['Refer credit OE2.7 Energy Consumption'],
   'oe 2.2': ['>10% peak energy demand reduction is achieved.'],
   'oe 2.6': ['The development is all electric with induction cooktops and no gas connection.'],
@@ -338,13 +345,12 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
-    // OE 1.1 / OE 1.2: always mark as achieved
-    if (/^oe\s+1\.[12]$/i.test(credit.creditId.trim())) {
+    // OE 1.1 / OE 1.2: always mark status as Achieved, then fall through to template for comment
+    if (/^oe\s+1\.[12]$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       await prisma.credit.update({
         where: { id: credit.id },
-        data: { commentsGIW: 'Achieved.' },
+        data: { creditStatus: 'Y' },
       })
-      continue
     }
 
     // IEQ 1.5 / 1.6 scoped-out: hide from admin panel (leave comment null so soft-delete fires)
@@ -525,9 +531,8 @@ ${/^iwm\s*1\.1$/i.test(credit.creditId.trim())
       const block = message.content[0]
       if (block.type === 'text') {
         const suffix = EXCELLENCE_FIXED_SUFFIX[credit.creditId.toLowerCase().trim()]
-        const description = suffix
-          ? `${block.text.trim()} ${suffix}`
-          : block.text.trim()
+        const cleaned = stripAILeakage(block.text)
+        const description = suffix ? `${cleaned} ${suffix}` : cleaned
         await prisma.eSDExcellenceOpportunity.create({
           data: {
             projectId,
@@ -670,7 +675,6 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
   // Fixed-comment scoped-out credits: restore if previously deleted with no comment
   const fixedScopedComments: Array<{ pattern: RegExp; comment: string }> = [
     { pattern: /^iwm\s*3\.1$/i,          comment: 'Landscape irrigation will be connected to the rainwater tank.' },
-    { pattern: /^oe\s*1\.[12]$/i,         comment: 'Achieved.' },
     { pattern: /^oe\s*3\.1$/i,           comment: 'Carpark ventilation fans are to be controlled by CO sensors.' },
     { pattern: /^oe\s*4\.[124]$/i,        comment: 'Not targeted.' },
     { pattern: /^oe\s*4\.5$/i,           comment: 'Not targeted.' },
