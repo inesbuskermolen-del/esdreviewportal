@@ -9,10 +9,10 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const TEMPLATES_DIR = path.resolve(process.cwd(), 'templates')
 
 const WORD_TEMPLATES: Record<string, string> = {
-  'Mixed-Use': 'DATE-GIWREF-Address-SMP-MixUse-2022-A.docx',
-  'Multi-Residential': 'DATE-GIWREF-Address-SMP-MixUse-2022-A.docx',
-  'Townhouse': 'DATE-GIWREF-Address-SMP-MixUse-2022-A.docx',
-  'Non-Residential': 'DATE-GIWREF-Address-SMP-MixUse-2022-A.docx',
+  'Mixed-Use':         'DATE-GIWREF-Address-SMP-MixUse-2022-A.docx',
+  'Multi-Residential': 'Date-GIWREF-Address-SMP-Multi Apt-2022-A.docx',
+  'Townhouse':         'Date-GIWREF-Address-SMP-TH-2022-A.docx',
+  'Non-Residential':   'Date-GIWREF-Address-SMP-Comm-2022-A.docx',
 }
 
 const EXCEL_TEMPLATES: Record<string, string> = {
