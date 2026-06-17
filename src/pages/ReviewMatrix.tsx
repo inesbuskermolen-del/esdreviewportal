@@ -469,7 +469,7 @@ export default function ReviewMatrix() {
                         ['Mandatory', 70],
                         ['Responsible Party', 150],
                         ...(isGIW ? [['Credit Score', 80], ['Credit Weight', 80]] as [string, number][] : []),
-                        ['Comments GIW', 220],
+                        ['Comments GIW', 440],
                         ['Comments Project Team', 260],
                       ].map(([label, w], i) => (
                         <th

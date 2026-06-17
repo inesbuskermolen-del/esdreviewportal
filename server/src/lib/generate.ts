@@ -244,6 +244,9 @@ export async function generateGIWComments(projectId: string): Promise<void> {
   })
 
   for (const credit of credits) {
+    // Manually edited comments are preserved across BESS revisions — never overwrite them
+    if (credit.lastEditedBy) continue
+
     // Innovation umbrella credits are split into line items by generateInnovationLineItems — skip here
     if (credit.category.toLowerCase().includes('innovation')) continue
 
@@ -468,6 +471,12 @@ export async function generateExcellenceOpportunities(projectId: string): Promis
     return true
   })
 
+  const EXCELLENCE_FIXED_SUFFIX: Record<string, string> = {
+    'ieq 2.1':            'This can be achieved through the introduction of mechanically assisted natural ventilation to non-cross ventilated apartments.',
+    'urban ecology 2.2':  'Significant planters at roof or large terraces can be claimed as green roofs.',
+    'urban ecology 2.3':  'This can be creepers, green wall systems or hanging plants cascading down.',
+  }
+
   for (const credit of eligible) {
     const userPrompt = `Generate a short ESD Excellence Opportunity description for this credit.
 
@@ -500,12 +509,14 @@ Score thresholds (include only if relevant):
 - Urban Ecology 2.3 Green Wall: This can be creepers, green wall systems or hanging plants cascading down.
 - Innovation 1.1: 1 point per confirmed initiative, 10 points max
 
-Write exactly 1 sentence describing the specific action needed to improve this credit, with the exact threshold or target value. Do not mention the current score. Do not mention the credit weight. Do not add extra sentences. Keep the response under 150 characters.`
+${/^iwm\s*1\.1$/i.test(credit.creditId.trim())
+  ? `Write 1–3 sentences describing how to improve this credit. Check the project data above — for each pathway not already in use (higher WELS ratings, toilet connection to rainwater/recycled water, landscape irrigation connection to rainwater/recycled water), mention it specifically. Do not mention pathways already achieved. Do not mention the credit weight.`
+  : `Write exactly 1 sentence describing the specific action needed to improve this credit, with the exact threshold or target value. Do not mention the current score. Do not mention the credit weight. Do not add extra sentences. Keep the response under 150 characters.`}`
 
     try {
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 150,
+        max_tokens: /^iwm\s*1\.1$/i.test(credit.creditId.trim()) ? 300 : 150,
         system:
           'You are an ESD consultant writing concise improvement notes for a BESS assessment. Be specific — cite actual numbers and thresholds from the project data. No generic advice. No AI references. One sentence only, under 150 characters: describe the specific improvement needed with an exact number or target. Never mention credit weights. Always use "retail" instead of "shop".',
         messages: [{ role: 'user', content: userPrompt }],
@@ -513,6 +524,10 @@ Write exactly 1 sentence describing the specific action needed to improve this c
 
       const block = message.content[0]
       if (block.type === 'text') {
+        const suffix = EXCELLENCE_FIXED_SUFFIX[credit.creditId.toLowerCase().trim()]
+        const description = suffix
+          ? `${block.text.trim()} ${suffix}`
+          : block.text.trim()
         await prisma.eSDExcellenceOpportunity.create({
           data: {
             projectId,
@@ -520,7 +535,7 @@ Write exactly 1 sentence describing the specific action needed to improve this c
             creditReference: credit.creditId,
             creditName: credit.creditName,
             currentScore: credit.creditScore,
-            improvementDescription: block.text.trim(),
+            improvementDescription: description,
           },
         })
       }
@@ -583,37 +598,37 @@ export async function generateInnovationLineItems(projectId: string): Promise<vo
   for (const credit of umbrellaCredits) {
     if (!credit.rawDataPoints?.trim()) continue
 
-    // Extract the list of claimed initiative names from the raw BESS data
-    let names: string[] = []
+    // Extract the list of claimed initiative names and descriptions from the raw BESS data
+    let items: { name: string; desc: string | null }[] = []
     try {
       const msg = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        system: 'Extract innovation initiative names from BESS assessment data. Return ONLY a valid JSON array of strings — no other text.',
+        max_tokens: 800,
+        system: 'Extract innovation initiative names and descriptions from BESS assessment data. Return ONLY a valid JSON array of objects with "name" and "desc" string fields — no other text. If no description is available for an initiative, set "desc" to null.',
         messages: [{
           role: 'user',
-          content: `List the innovation initiatives claimed in this BESS data as a JSON array:\n\n${credit.rawDataPoints}`,
+          content: `List the innovation initiatives claimed in this BESS data as a JSON array of {name, desc} objects:\n\n${credit.rawDataPoints}`,
         }],
       })
       const raw = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : '[]'
       const match = raw.match(/\[[\s\S]*\]/)
-      names = match ? (JSON.parse(match[0]) as string[]) : []
+      items = match ? (JSON.parse(match[0]) as { name: string; desc: string | null }[]) : []
     } catch (err) {
       console.error('[generate] Innovation extraction failed:', err)
       continue
     }
 
-    if (names.length === 0) continue
+    if (items.length === 0) continue
 
-    for (const name of names) {
-      const trimmed = String(name).trim()
+    for (const item of items) {
+      const trimmed = String(item.name).trim()
       if (!trimmed) continue
 
       // Skip permanently blocked initiatives
       const lower = trimmed.toLowerCase()
       if (BLOCKED_INNOVATION_NAMES.has(lower)) continue
 
-      // Match against INNOVATION_INITIATIVES to get the description and points
+      // Match against INNOVATION_INITIATIVES for description and points; fall back to extracted desc
       const initiative = INNOVATION_INITIATIVES.find(
         (i) =>
           i.name.toLowerCase() === lower ||
@@ -623,7 +638,7 @@ export async function generateInnovationLineItems(projectId: string): Promise<vo
 
       const pts = initiative?.pts ?? '0.9'
       const ptsNum = parseFloat(pts) || 0.9
-      const desc = initiative?.desc ?? null
+      const desc = initiative?.desc ?? item.desc ?? null
 
       await prisma.credit.create({
         data: {

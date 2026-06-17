@@ -295,7 +295,7 @@ Rules:
 - creditStatus: Achieved → "Y", Not Achieved or 0% → "N", Scoped Out / N/A / Disabled → "ScopedOut"
 - EXCLUDE credits with status Disabled from the credits array entirely
 - creditRequirement: the specific compliance requirement for this credit as stated in the BESS document (e.g. "Provide a minimum of 24 long-stay bicycle spaces"). 1–2 sentences. Null if not stated.
-- rawDataPoints: key numbers and specs only for this credit (e.g. "Required 24 long-stay bicycle spaces + 4 short-stay. Provided 20 long-stay + 2 short-stay." or "WELS 6-star taps, 3-star showers, no rainwater tank. 28% potable water reduction achieved."). 1–2 sentences max. Null if no specific data in PDF for this credit. Exception: for IWM 1.1 (potable water / fixtures), list every fixture type and its WELS star rating on a separate line — do not truncate.
+- rawDataPoints: key numbers and specs only for this credit (e.g. "Required 24 long-stay bicycle spaces + 4 short-stay. Provided 20 long-stay + 2 short-stay." or "WELS 6-star taps, 3-star showers, no rainwater tank. 28% potable water reduction achieved."). 1–2 sentences max. Null if no specific data in PDF for this credit. Exception: for IWM 1.1 (potable water / fixtures), list every fixture type and its WELS star rating on a separate line — do not truncate. Exception: for Innovation credits, list every claimed initiative name and its description on a separate line — do not truncate.
 - Return ONLY the JSON object — no markdown, no explanation
 
 BESS text:
@@ -429,6 +429,41 @@ ${trimmedText}`
     .map((e) => ({ projectId, creditReference: e.creditReference, drawingType: e.type, requirement: e.requirement }))
   if (drawingData.length > 0) {
     await prisma.drawingRequirement.createMany({ data: drawingData })
+  }
+
+  /* Carry over manually-edited GIW comments from the most recent prior revision */
+  if (parentProjectId) {
+    const prevRevisions = await prisma.project.findMany({
+      where: { OR: [{ id: parentProjectId }, { parentProjectId, id: { not: projectId } }] },
+      select: { id: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    const prevProjectId = prevRevisions[0]?.id
+    if (prevProjectId) {
+      const editedCredits = await prisma.credit.findMany({
+        where: { projectId: prevProjectId, lastEditedBy: { not: null } },
+        select: { creditId: true, commentsGIW: true, lastEditedBy: true, lastEditedAt: true },
+      })
+      if (editedCredits.length > 0) {
+        const newCredits = await prisma.credit.findMany({
+          where: { projectId },
+          select: { id: true, creditId: true },
+        })
+        const editedMap = new Map(editedCredits.map(c => [c.creditId.toLowerCase().trim(), c]))
+        await Promise.all(
+          newCredits
+            .filter(c => editedMap.has(c.creditId.toLowerCase().trim()))
+            .map(c => {
+              const prev = editedMap.get(c.creditId.toLowerCase().trim())!
+              return prisma.credit.update({
+                where: { id: c.id },
+                data: { commentsGIW: prev.commentsGIW, lastEditedBy: prev.lastEditedBy, lastEditedAt: prev.lastEditedAt },
+              })
+            }),
+        )
+        console.log(`[create-from-pdf] Carried over ${editedCredits.length} manually-edited GIW comment(s) from prior revision`)
+      }
+    }
   }
 
   /* Trigger comment + drawing generation (these set generationStatus to complete/error) */

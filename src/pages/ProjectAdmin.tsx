@@ -1132,7 +1132,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                 <th className="text-left py-2 pr-4 font-medium w-16">Weight</th>
                 <th className="text-left py-2 pr-4 font-medium w-20">Mandatory</th>
                 <th className="text-left py-2 pr-4 font-medium">Responsible Party</th>
-                <th className="text-left py-2 pr-5 font-medium">Comments GIW</th>
+                <th className="text-left py-2 pr-5 font-medium" style={{ minWidth: '440px' }}>Comments GIW</th>
               </tr>
             </thead>
             <tbody>
