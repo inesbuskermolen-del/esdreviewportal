@@ -2223,7 +2223,11 @@ export async function generateSMPReport(
     .replace(/-+$/, '')
   const rev = project.revision ?? 'A'
 
-  const wordFilename = `${dateStr}-${giwref}-${safeAddr}-SMP-MixUse-2022-${rev}.docx`
+  const typologySlug: Record<string, string> = {
+    'Mixed-Use': 'MixUse', 'Multi-Residential': 'Multi-Apt',
+    'Townhouse': 'TH', 'Non-Residential': 'Comm',
+  }
+  const wordFilename = `${dateStr}-${giwref}-${safeAddr}-SMP-${typologySlug[typology] ?? 'SMP'}-2022-${rev}.docx`
   const excelFilename = `${dateStr}-${giwref}-${safeAddr}-SMP-Visualisations-Rev${rev}.xlsx`
 
   const displayDate = `${dd}/${mm}/${yyyy}`
