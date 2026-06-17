@@ -4,6 +4,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import NavBar from '@/components/NavBar'
+import { CreditInfoButton } from '@/components/CreditInfoButton'
 import type { Credit, ESDExcellenceOpportunity, ReviewerSession } from '@/types'
 
 /* ── localStorage session ── */
@@ -465,11 +466,11 @@ export default function ReviewMatrix() {
                     <tr style={{ backgroundColor: '#00602B' }}>
                       {([
                         ['Credit Name', 200],
-                        ['Credit Requirement', 180],
+                        ['Credit Requirement', 270],
                         ['Mandatory', 60],
                         ['Responsible Party', 110],
                         ...(isGIW ? [['Credit Score', 65], ['Credit Weight', 65]] as [string, number][] : []),
-                        ['Comments GIW', 240],
+                        ['Comments GIW', 180],
                         ['Comments Project Team', 0],
                       ] as [string, number][]).map(([label, w], i) => (
                         <th
@@ -665,8 +666,8 @@ function CreditRow({
         </span>
       </td>
 
-      {/* Requirement — collapsible */}
-      <RequirementCell requirement={credit.creditRequirement} />
+      {/* Requirement */}
+      <RequirementCell requirement={credit.creditRequirement} creditId={credit.creditId} />
 
       {/* Mandatory */}
       <td style={{ ...tdBase, textAlign: 'center' }}>
@@ -771,11 +772,12 @@ function CreditRow({
 
 /* ── RequirementCell ── */
 
-function RequirementCell({ requirement }: { requirement?: string | null }) {
+function RequirementCell({ requirement, creditId }: { requirement?: string | null; creditId: string }) {
   const text = requirement ?? ''
   return (
     <td style={{ ...tdBase, color: '#C0C0C0', fontSize: '12px' }}>
       {text}
+      <CreditInfoButton creditId={creditId} />
     </td>
   )
 }

@@ -33,6 +33,8 @@ export interface ReportProjectData {
   architect: string | null
   bessScore?: number | null
   totalDwellings?: number | null
+  buildingLevels?: number | null
+  siteArea?: number | null
 }
 
 export interface ReportCreditData {
@@ -304,6 +306,7 @@ PROJECT DATA:
 - Architect: ${project.architect ?? 'Not provided'}
 - Revision: ${project.revision ?? 'A'}
 - Date: ${project.date ? new Date(project.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Not provided'}
+- Site Area m²: ${project.siteArea != null ? project.siteArea : 'Not provided'}
 
 BESS CREDIT DATA (creditId | status | rawDataPoints):
 ${creditSummary || 'No credit data available'}
@@ -345,7 +348,7 @@ For the [XX] values in document order, the contexts are:
 7. 3-bedroom apartments count — same source as #5
 8. retail area m2
 9. commercial/office area m2 (office = commercial)
-10. site surface area m2 — from the front page / project inputs section of the BESS PDF (the "Site Area" field). Search all credits' rawDataPoints for patterns like "site area: 2,500m²", "2500 m² site", "total site area of 2500m²". Urban Ecology and IWM credits often reference it. Return just the number without units (e.g. "2500").
+10. site surface area m2 — use the "Site Area m²" value from PROJECT DATA above if provided. Otherwise search credits' rawDataPoints for patterns like "site area: 2,500m²", "2500 m² site", "total site area of 2500m²". Return just the number without units (e.g. "2500").
 11. distance to Melbourne CBD km — use your knowledge of Melbourne geography based on the project suburb/address
 12. landscape irrigation description (Key ESD Initiatives table cell, paragraph style "Landscape_Irrigation") — from IWM 3.1 rawDataPoints; if scoped out: 'Not targeted.'; if no data: 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'
 13. solar PV system size kW (Key ESD Initiatives table: "A [XX]kW Solar PV system is to be located on the roof of the development") — from OE 4.2 or OE 4.5 rawDataPoints
@@ -677,16 +680,20 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
 
   // ── Number of levels ─────────────────────────────────────────────────────
   {
-    // Include project name in search — BESS PDF often names the project "8 Storey Residential"
-    const searchCorpus = (project.name ?? '') + ' ' + credits.map(c => c.rawDataPoints ?? '').join(' ')
-    const levelsMatch =
-      searchCorpus.match(/(\d+)\s*[-–]?\s*(?:storey|storeys|level|levels|floor|floors)\b/i)
-      ?? searchCorpus.match(/(?:number of (?:storeys?|levels?|floors?)[:\s]+)(\d+)/i)
-      ?? searchCorpus.match(/(?:height|building)[^:\n]*:\s*(?:[\d.]+ ?m[,\s]+)?(\d+)[\s-]?(?:storey|level|floor)/i)
-      ?? searchCorpus.match(/(\d+)[\s-](?:storey|level|floor)\s+(?:building|development|residential|mixed)/i)
-      ?? searchCorpus.match(/(?:over|across|spanning)\s+(\d+)\s+(?:storey|storeys|level|levels|floor|floors)/i)
-      ?? searchCorpus.match(/(?:storey|storeys|level|levels|floor|floors)[:\s]+(\d+)/i)
-    const val = levelsMatch?.[1] ?? null
+    // Primary: use the stored buildingLevels field extracted from BESS page 2 Buildings table "Height"
+    // Fallback: regex scan of project name and all rawDataPoints
+    let val: string | null = project.buildingLevels != null ? String(project.buildingLevels) : null
+    if (!val) {
+      const searchCorpus = (project.name ?? '') + ' ' + credits.map(c => c.rawDataPoints ?? '').join(' ')
+      const levelsMatch =
+        searchCorpus.match(/(\d+)\s*[-–]?\s*(?:storey|storeys|level|levels|floor|floors)\b/i)
+        ?? searchCorpus.match(/(?:number of (?:storeys?|levels?|floors?)[:\s]+)(\d+)/i)
+        ?? searchCorpus.match(/(?:height|building)[^:\n]*:\s*(?:[\d.]+ ?m[,\s]+)?(\d+)[\s-]?(?:storey|level|floor)/i)
+        ?? searchCorpus.match(/(\d+)[\s-](?:storey|level|floor)\s+(?:building|development|residential|mixed)/i)
+        ?? searchCorpus.match(/(?:over|across|spanning)\s+(\d+)\s+(?:storey|storeys|level|levels|floor|floors)/i)
+        ?? searchCorpus.match(/(?:storey|storeys|level|levels|floor|floors)[:\s]+(\d+)/i)
+      val = levelsMatch?.[1] ?? null
+    }
 
     if (val !== null) {
       // Paragraph-level replacement for level-related context keywords
@@ -759,13 +766,19 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
 
   // ── Site area ─────────────────────────────────────────────────────────────
   {
-    const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
-    const siteMatch = allRaw.match(/site\s+area[^:]*:?\s*([\d,]+)\s*m/i) ??
-                      allRaw.match(/([\d,]+)\s*m2?\s+site/i) ??
-                      allRaw.match(/total\s+site[^:]*:?\s*([\d,]+)/i) ??
-                      allRaw.match(/site[^:]*:\s*([\d,]+)/i)
-    if (siteMatch) {
-      const val = siteMatch[1].replace(/,/g, '')
+    // Primary: stored siteArea field extracted from the BESS PDF during upload
+    // Fallback: regex scan of rawDataPoints (Urban Ecology / IWM credits sometimes mention it)
+    let siteVal: string | null = project.siteArea != null ? String(project.siteArea) : null
+    if (!siteVal) {
+      const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
+      const siteMatch = allRaw.match(/site\s+area[^:]*:?\s*([\d,]+)\s*m/i) ??
+                        allRaw.match(/([\d,]+)\s*m2?\s+site/i) ??
+                        allRaw.match(/total\s+site[^:]*:?\s*([\d,]+)/i) ??
+                        allRaw.match(/site[^:]*:\s*([\d,]+)/i)
+      siteVal = siteMatch ? siteMatch[1].replace(/,/g, '') : null
+    }
+    if (siteVal) {
+      const val = siteVal
       // Inline prose: "surface area of [XX]"
       for (const kw of ['surface area of', 'site area of', 'area of']) {
         const idx = xml.indexOf(kw)
@@ -2211,7 +2224,8 @@ export async function generateSMPReport(
   if (!fs.existsSync(excelTemplatePath)) throw new Error(`Excel template file missing: ${excelTemplateName}`)
 
   // Build output filenames following the existing naming convention
-  const dateObj = project.date ? new Date(project.date) : new Date()
+  // Always use today as the generation date — project.date is the lodgement date, not the report date
+  const dateObj = new Date()
   const dd = String(dateObj.getDate()).padStart(2, '0')
   const mm = String(dateObj.getMonth() + 1).padStart(2, '0')
   const yyyy = dateObj.getFullYear()

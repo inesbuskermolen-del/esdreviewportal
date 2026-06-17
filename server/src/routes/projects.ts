@@ -258,7 +258,9 @@ async function processUploadedPdf(projectId: string, trimmedText: string, origin
     "typology": "Multi-Residential | Mixed-Use | Townhouse | Non-Residential | null",
     "client": "string or null",
     "architect": "string or null",
-    "totalDwellings": number or null
+    "totalDwellings": number or null,
+    "buildingLevels": number or null,
+    "siteArea": number or null
   },
   "credits": [
     {
@@ -292,6 +294,8 @@ Rules:
 - client: the project client/owner name as stated in the PDF (cover page or project info section). Null if not stated.
 - architect: the architect firm or person's name as stated in the PDF. Null if not stated.
 - totalDwellings: total number of residential dwellings/apartments/units from the "Dwellings & Non-Residential Spaces" table (page 3 of BESS). This is the sum of all dwelling types (Studio, 1 Bed, 2 Bed, 3 Bed, etc.). Null if not a residential project or not stated.
+- buildingLevels: number of building levels/storeys from the "Height" column in the Buildings table on page 2 of the BESS PDF (e.g. if the Height cell says "8 Levels" return 8, if it says "8" return 8). Return only the integer count of levels. Null if not found.
+- siteArea: site area in m² from the project inputs section or Buildings table on page 1 or 2 of the BESS PDF (look for the "Site Area" field). Return only the integer number of square metres with no units (e.g. if it says "1,234 m²" return 1234). Null if not found.
 - creditStatus: Achieved → "Y", Not Achieved or 0% → "N", Scoped Out / N/A / Disabled → "ScopedOut"
 - EXCLUDE credits with status Disabled from the credits array entirely
 - creditRequirement: the specific compliance requirement for this credit as stated in the BESS document (e.g. "Provide a minimum of 24 long-stay bicycle spaces"). 1–2 sentences. Null if not stated.
@@ -325,6 +329,8 @@ ${trimmedText}`
       client?: string
       architect?: string
       totalDwellings?: number
+      buildingLevels?: number
+      siteArea?: number
     }
     credits: Array<{
       creditId: string
@@ -389,6 +395,8 @@ ${trimmedText}`
       client: parsed.project.client?.trim() || null,
       architect: parsed.project.architect?.trim() || null,
       totalDwellings: parsed.project.totalDwellings != null ? parseInt(String(parsed.project.totalDwellings)) : null,
+      buildingLevels: parsed.project.buildingLevels != null ? parseInt(String(parsed.project.buildingLevels)) : null,
+      siteArea: parsed.project.siteArea != null ? parseInt(String(parsed.project.siteArea)) : null,
     },
   })
 
@@ -741,6 +749,8 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
         client: true,
         architect: true,
         totalDwellings: true,
+        buildingLevels: true,
+        siteArea: true,
       },
     })
     if (!project) {

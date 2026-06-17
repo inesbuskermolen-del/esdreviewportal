@@ -61,4 +61,12 @@
            focus:outline-none focus:border-giw-olive transition-colors;
     font-family: 'Open Sans', sans-serif;
   }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }

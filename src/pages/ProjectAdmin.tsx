@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import NavBar from '@/components/NavBar'
+import { CreditInfoButton } from '@/components/CreditInfoButton'
 import type { Project, Credit, DrawingRequirement, Reviewer, ESDExcellenceOpportunity, RevisionSummary } from '@/types'
 
 type Tab = 'matrix' | 'drawings'
@@ -954,6 +955,7 @@ function AutoTextarea({
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
       rows={1}
+      className="no-scrollbar"
       style={{
         width: '100%',
         resize: 'none',
@@ -1107,12 +1109,12 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
             <th className="text-left py-2 px-5 font-medium" style={{ width: '70px' }}>ID</th>
             <th className="text-left py-2 pr-4 font-medium" style={{ width: '120px' }}>Credit</th>
             <th className="text-left py-2 pr-4 font-medium" style={{ width: '160px' }}>Requirement</th>
-            <th className="text-left py-2 pr-4 font-medium" style={{ width: '90px' }}>Status</th>
+            <th className="text-left py-2 pr-4 font-medium" style={{ width: '112px' }}>Status</th>
             <th className="text-left py-2 pr-4 font-medium" style={{ width: '50px' }}>Score</th>
             <th className="text-left py-2 pr-4 font-medium" style={{ width: '55px' }}>Weight</th>
             <th className="text-left py-2 pr-4 font-medium" style={{ width: '65px' }}>Mandatory</th>
             <th className="text-left py-2 pr-4 font-medium" style={{ width: '110px' }}>Responsible Party</th>
-            <th className="text-left py-2 pr-5 font-medium">Comments GIW</th>
+            <th className="text-left py-2 pl-2 pr-5 font-medium">Comments GIW</th>
           </tr>
         </thead>
         <tbody>
@@ -1153,9 +1155,10 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                     >
                       {credit.creditId}
                     </td>
-                    <td className="py-2 pr-4 text-sm">{credit.creditName}</td>
-                    <td className="py-2 pr-4 text-sm" style={{ color: '#555' }}>
+                    <td className="py-2 pr-4 text-sm" style={{ overflow: 'hidden', wordBreak: 'break-word' }}>{credit.creditName}</td>
+                    <td className="py-2 pr-4 text-sm" style={{ color: '#555', overflow: 'hidden', wordBreak: 'break-word' }}>
                       {credit.creditRequirement ?? '—'}
+                      <CreditInfoButton creditId={credit.creditId} />
                     </td>
                     <td className="py-2 pr-4">
                       <span
@@ -1189,10 +1192,10 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                         <span style={{ display: 'block', marginTop: '4px', padding: '3px 8px', borderRadius: '3px', backgroundColor: '#FFF0E0', fontFamily: 'Montserrat, sans-serif', fontWeight: 700, fontSize: '13px', color: '#B84D00', textAlign: 'center' }}>GDFT</span>
                       )}
                     </td>
-                    <td className="py-2 pr-4 text-sm" style={{ color: '#555' }}>
+                    <td className="py-2 pr-4 text-sm" style={{ color: '#555', overflow: 'hidden', wordBreak: 'break-word' }}>
                       {credit.responsibleParty ?? '—'}
                     </td>
-                    <td className="py-2 pr-5">
+                    <td className="py-2 pl-2 pr-5">
                       {credit.creditStatus === 'ScopedOut' && !giwComments[credit.id]?.trim() ? (
                         <span style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', fontStyle: 'italic' }}>
                           Not targeted

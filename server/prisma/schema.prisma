@@ -24,6 +24,8 @@ model Project {
   client           String?
   architect        String?
   totalDwellings   Int?
+  buildingLevels   Int?
+  siteArea         Int?
   parentProjectId  String?
   parent           Project?  @relation("ProjectRevisions", fields: [parentProjectId], references: [id])
   revisions        Project[] @relation("ProjectRevisions")
