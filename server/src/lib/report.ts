@@ -6,7 +6,7 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const TEMPLATES_DIR = path.resolve(__dirname, '../../templates')
+const TEMPLATES_DIR = path.resolve(process.cwd(), 'templates')
 
 const WORD_TEMPLATES: Record<string, string> = {
   'Mixed-Use': 'DATE-GIWREF-Address-SMP-MixUse-2022-A.docx',
