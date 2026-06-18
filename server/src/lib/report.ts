@@ -2224,18 +2224,21 @@ async function fillWordTemplate(
     }
   }
 
-  // ── Daylight DTS block deletion ────────────────────────────────────────────
-  // Remove the Deemed-to-Satisfy block when daylight was assessed via simulation/modelling
-  // OR when the BESS built-in calculator was used (both are alternatives to DTS).
-  // Methodology is determined from IEQ 1.1 (Daylight Living) and IEQ 1.2 (Daylight Bedrooms).
+  // ── Daylight pathway detection ────────────────────────────────────────────
+  // BESS rawDataPoints key phrases per pathway:
+  //   DTS:      "use the bess deemed to satisfy (dts) method?: yes"
+  //   Built-in: "what calculation approach do you want to use?: use the built-in calculation tools"
+  //   Modelling:"what calculation approach do you want to use?: provide your own calculations"
   {
     const daylightRaw = credits
       .filter(c => /ieq 1\.[12]/i.test(c.creditId))
       .map(c => (c.rawDataPoints ?? '').toLowerCase())
       .join(' ')
-    const usedModelling = /simulat|modell|daylight factor|\bdf\b|\d+\s*%\s*of\s*(living|bedroom)/i.test(daylightRaw)
-    const usedBuiltInDaylight = /built[- ]?in\s*calculator|bess\s*calculator|bess\s*built[- ]?in/i.test(daylightRaw)
-    if (usedModelling || usedBuiltInDaylight) {
+    const usedDTS     = /use the bess deemed to satisfy|deemed.to.satisfy.*method.*:\s*yes/i.test(daylightRaw)
+    const usedBuiltIn = /use the built-in calculation tools/i.test(daylightRaw)
+
+    // Delete DTS body paragraphs when modelling or built-in calculator was used
+    if (!usedDTS) {
       renderedXml = deleteParagraphsByText(renderedXml, [
         /^Or$/i,
         /Deemed-to-Satisfy method for IEQ/i,
@@ -2246,31 +2249,45 @@ async function fillWordTemplate(
         /building separation tables/i,
       ])
     }
-  }
 
-  // ── Daylight method: BESS built-in calculator vs modelling ───────────────
-  // If IEQ 1.1/1.2 rawDataPoints indicate the BESS built-in calculator was used,
-  // replace the modelling sentence with the built-in calculator sentence.
-  {
-    const daylightRaw = credits
-      .filter(c => /ieq 1\.[12]/i.test(c.creditId))
-      .map(c => (c.rawDataPoints ?? '').toLowerCase())
-      .join(' ')
-    const usedBuiltIn = /built[- ]?in\s*calculator|bess\s*calculator|bess\s*built[- ]?in/i.test(daylightRaw)
+    // Delete the daylight modelling appendix and body reference for DTS and built-in pathways
+    if (usedDTS || usedBuiltIn) {
+      try {
+        renderedXml = deleteSectionByHeading(renderedXml, /Appendix.*Daylight\s*Modelling/i)
+      } catch (e) {
+        console.error('[report] deleteDaylightAppendix failed:', e)
+      }
+      renderedXml = deleteParagraphsByText(renderedXml, [/Refer\s+Appendix.*Daylight\s*Modelling/i])
+    }
+
+    // DTS pathway: replace criteria table intro with DTS sentence, delete % result lines
+    if (usedDTS) {
+      const dtsSentence = 'The development complies with the BESS Deemed-to-Satisfy method for Daylight.'
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+        const texts: string[] = []
+        const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(para)) !== null) texts.push(m[1])
+        const combined = texts.join('')
+        if (/daylight modelling has been conducted for a representative/i.test(combined))
+          return applyParaChanges(para, [{ pos: 0, len: combined.length, replacement: dtsSentence }])
+        if (/% of (?:living|bedroom) floor area/i.test(combined))
+          return ''
+        return para
+      })
+    }
+
+    // Built-in calculator pathway: replace criteria table intro only (% lines remain)
     if (usedBuiltIn) {
-      const escaped = 'The BESS built-in calculator has been used to demonstrate compliance.'
-      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
+      const builtInSentence = 'The BESS built-in daylight calculator has been used to assess compliance. The summary result is as follows:'
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
         const texts: string[] = []
         const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
         let m: RegExpExecArray | null
         while ((m = re.exec(para)) !== null) texts.push(m[1])
         const combined = texts.join('')
         if (!/daylight modelling has been conducted for a representative/i.test(combined)) return para
-        let replaced = false
-        return para.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (_: string, open: string, content: string, close: string) => {
-          if (!replaced && content.trim()) { replaced = true; return `${open}${escaped}${close}` }
-          return `${open}${close}`
-        })
+        return applyParaChanges(para, [{ pos: 0, len: combined.length, replacement: builtInSentence }])
       })
     }
   }
