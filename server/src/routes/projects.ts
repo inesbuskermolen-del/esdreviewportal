@@ -765,7 +765,7 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
 
     const credits = await prisma.credit.findMany({
       where: { projectId: req.params.id, deletedByGIW: false },
-      select: { creditId: true, creditStatus: true, rawDataPoints: true, category: true },
+      select: { creditId: true, creditName: true, creditStatus: true, rawDataPoints: true, category: true },
     })
 
     const { client, architect, giwref } = req.body as { client?: string; architect?: string; giwref?: string }

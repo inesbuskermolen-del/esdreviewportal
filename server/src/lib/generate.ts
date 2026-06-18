@@ -360,6 +360,47 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       })
     }
 
+    // IEQ 1.1 / IEQ 1.2: deterministically fill the daylight percentage
+    // The template [XX]% means the % of living areas / bedrooms that comply, NOT the credit score.
+    // BESS scores 66% when 80% of areas pass, 100% when all pass — Claude can't infer this.
+    if (/^ieq\s+1\.[12]$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const isLiving = /^ieq\s+1\.1/i.test(credit.creditId.trim())
+
+      // Check for DtS pathway — use the fixed comment, no percentage needed
+      if (/\bdts\b|deemed.to.satisfy|daylight.*dts|dts.*path/i.test(raw)) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: 'The daylight DtS pathway has been applied to demonstrate daylight compliance.' },
+        })
+        continue
+      }
+
+      // Try to extract actual % from rawDataPoints (e.g. "85% of living areas comply")
+      const rawPctMatch = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:living|bedroom|habitable|area|space|comply|achieve)/i)
+        ?? raw.match(/(?:living|bedroom|habitable|area|space)[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i)
+      let areaPct: string | null = rawPctMatch ? rawPctMatch[1] : null
+
+      // Fall back to creditScore → area percentage mapping
+      if (!areaPct && credit.creditScore != null) {
+        const s = credit.creditScore
+        if (s >= 95) areaPct = '100'
+        else if (s >= 60) areaPct = '80'
+        else if (s >= 30) areaPct = '40'
+      }
+
+      if (areaPct) {
+        const areaLabel = isLiving ? 'living areas' : 'bedrooms'
+        const comment = `The BESS built in daylight calculator has been applied to demonstrate compliance. ${areaPct}% of the ${areaLabel} achieve the BESS best practice daylight requirements.`
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: comment },
+        })
+        continue
+      }
+      // If we still can't determine the percentage, fall through to AI with an enriched prompt
+    }
+
     // IEQ 1.5 / 1.6 scoped-out: hide from admin panel (leave comment null so soft-delete fires)
     if (/^ieq\s+1\.[56]$/i.test(credit.creditId.trim()) && credit.creditStatus === 'ScopedOut') continue
 
