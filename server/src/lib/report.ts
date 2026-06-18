@@ -380,6 +380,7 @@ Fill position N with the value that belongs in that paragraph context:
 ${xxPositionList}
 
 RULES FOR DETERMINING [XX] VALUES (match by paragraph context above):
+- bedroom breakdown lines ("[XX] x 1-bedroom apartments", "[XX] x 2-bedroom", "[XX] x studio", etc.) → return "[XX]" (leave these unfilled — they will remain as placeholders in the document)
 - "apartments" / "dwellings" / "will include … apartments" → total residential dwellings from OE 2.x rawDataPoints; SUM ALL bedroom types (Studio + 1BR + 2BR + 3BR etc.) — do NOT return one bedroom type alone. E.g. '20 x 1BR, 30 x 2BR, 10 x 3BR' → "60". Return just the number.
 - "retail tenancies" count → from OE 2.x rawDataPoints "Retail: N tenancies"; return just the number or null if no retail
 - "commercial" / "office" tenancies count → from OE 2.x rawDataPoints "Office: N" or "Commercial: N"; return just the number or null
@@ -1860,23 +1861,23 @@ async function fillWordTemplate(
   // Extract document paragraphs and criteria row texts for context
   const docXml = zip.file('word/document.xml')!.asText()
 
-  // Remove bedroom breakdown paragraphs before positional [XX] counting —
-  // these lines (e.g. "[XX] x 1-bedroom apartments") are not filled in the SMP report.
+  // Criteria names come from the no-bedrooms version to avoid spurious row text
   const docXmlNoBedrooms = deleteParagraphsByText(docXml, [
     /\[XX\].*\d[\s-]?bed(?:room)?s?\b/i,
     /\d[\s-]?bed(?:room)?s?.*\[XX\]/i,
   ])
-
-  const paragraphs = extractDocParagraphs(docXmlNoBedrooms)
   const criteriaNames = extractTableRowTexts(docXmlNoBedrooms)
+  const paragraphs = extractDocParagraphs(docXml)
 
-  // Extract the [XX] occurrences with context — dynamically matches this specific template
-  const xxOccurrences = extractXXOccurrences(docXmlNoBedrooms)
+  // Extract [XX] occurrences from the FULL document so bedroom breakdown lines are
+  // counted as positions — Claude leaves them as "[XX]" (unfilled) so they stay
+  // visible in the output document.
+  const xxOccurrences = extractXXOccurrences(docXml)
   console.log(`[report] Template has ${xxOccurrences.length} [XX] occurrences`)
 
   // Escape long-form [XX...] placeholders before Docxtemplater sees them
   // (Docxtemplater's expression parser can't handle spaces/periods in tag names)
-  const escapedDocXml = escapeLongXXTags(docXmlNoBedrooms)
+  const escapedDocXml = escapeLongXXTags(docXml)
   zip.file('word/document.xml', escapedDocXml)
 
   // Ask Claude to fill all [XX], [XXX], etc. and decide which rows to delete
