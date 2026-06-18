@@ -1948,9 +1948,22 @@ async function fillWordTemplate(
 
   // ── BESS score — must run before shielding because the text lives inside the
   // Key ESD Initiatives table (which is shielded from all later post-processing).
+  // The template uses [XX]% which Docxtemplater fills before we get here, so we
+  // match whatever value (number or leftover [XX]) already sits in that slot.
   if (project.bessScore != null) {
-    const score = Math.round(project.bessScore)
-    renderedXml = renderedXml.replace('BESS score of XX% with', () => `BESS score of ${score}% with`)
+    const score = String(Math.round(project.bessScore))
+    renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+      const texts: string[] = []
+      const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(para)) !== null) texts.push(m[1])
+      const combined = texts.join('')
+      if (!/BESS\s+score/i.test(combined)) return para
+      const hit = combined.match(/BESS\s+score\s+of\s+(\[XX\]|\d+(?:\.\d+)?)\s*%/i)
+      if (!hit || hit.index === undefined) return para
+      const tokenStart = hit.index + hit[0].indexOf(hit[1])
+      return applyParaChanges(para, [{ pos: tokenStart, len: hit[1].length, replacement: score }])
+    })
   }
 
   // ── OE 1.1 thermal % — must run before shielding so the Key ESD Initiatives
