@@ -953,6 +953,9 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
   }
 
   // ── OE 1.3 Electrification: update metering row when all-electric ─────────
+  // The metering description lives in Cell 3 (not Cell 2) of the Metering row,
+  // so fillTableCellByHeader (which targets Cell 2) doesn't reach it.
+  // Use a paragraph-level scan matching the existing "cold water…gas metering" text.
   {
     const electCredit = credits.find(c =>
       /^oe\s*1\.3/i.test(c.creditId) ||
@@ -960,11 +963,15 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
       /electrif/i.test(c.creditName ?? ''))
     if (electCredit?.creditStatus === 'Y') {
       const meterDesc = 'Individual electricity sub-meters are to be provided for each apartment and tenancy. The development will be all-electric with no gas connection required.'
-      for (const pat of [/^metering$/i, /^sub[- ]?metering$/i, /electricity metering/i, /^metering/i]) {
-        const prev = xml
-        xml = fillTableCellByHeader(xml, pat, meterDesc)
-        if (xml !== prev) break
-      }
+      xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+        const texts: string[] = []
+        const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(para)) !== null) texts.push(m[1])
+        const combined = texts.join('')
+        if (!/cold water.*hot water.*gas metering/i.test(combined)) return para
+        return applyParaChanges(para, [{ pos: 0, len: combined.length, replacement: meterDesc }])
+      })
     }
   }
 
@@ -2342,6 +2349,26 @@ async function fillWordTemplate(
   // ── Retail / commercial line items ────────────────────────────────────────
   const { hasRetail, hasCommercial } = detectNonResidential(credits, project.typology ?? null)
   safeApply('removeNonResidentialLines', () => removeNonResidentialLines(renderedXml, hasRetail, hasCommercial))
+
+  // ── WELS star rating: strip [N] brackets left by Docxtemplater nullGetter ──
+  // The template has [4]/[5] as tag-delimited placeholders (e.g. "WELS [4] Star - Toilets").
+  // Each bracket is a separate run, so applyParaChanges handles the split correctly.
+  renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const texts: string[] = []
+    const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(para)) !== null) texts.push(m[1])
+    const combined = texts.join('')
+    if (!combined.includes('WELS')) return para
+    const changes: Array<{ pos: number; len: number; replacement: string }> = []
+    const bracketRe = /\[(\d+)\]/g
+    let bm: RegExpExecArray | null
+    while ((bm = bracketRe.exec(combined)) !== null) {
+      changes.push({ pos: bm.index, len: bm[0].length, replacement: bm[1] })
+    }
+    if (!changes.length) return para
+    return applyParaChanges(para, changes)
+  })
 
   // ── BESS rawDataPoints fallbacks (catches any unfilled placeholders) ──────
   safeApply('applyBESSFallbacks', () => applyBESSFallbacks(renderedXml, credits, project))
