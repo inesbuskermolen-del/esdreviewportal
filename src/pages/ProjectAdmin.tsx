@@ -993,6 +993,14 @@ function creditStatusStyle(status: string) {
   return STATUS_COLOURS[status] ?? { bg: '#FFFFFF', text: '#2C2C2C' }
 }
 
+function shortCreditId(id: string): string {
+  return id
+    .replace(/^Management\s+/i, 'M ')
+    .replace(/^Transport\s+/i, 'Tr ')
+    .replace(/^Urban Ecology\s+/i, 'UE ')
+    .replace(/^Innovation\s+/i, 'Inn ')
+}
+
 function getCategoryOrder(creditId: string, category = ''): number {
   const id = creditId.toLowerCase()
   const cat = category.toLowerCase()
@@ -1153,7 +1161,7 @@ function ReviewMatrix({ credits, gdft, genStatus }: { credits: Credit[]; gdft: b
                       className="py-2 px-5 font-medium"
                       style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '12px' }}
                     >
-                      {credit.creditId}
+                      {shortCreditId(credit.creditId)}
                     </td>
                     <td className="py-2 pr-4 text-sm" style={{ overflow: 'hidden', wordBreak: 'break-word' }}>{credit.creditName}</td>
                     <td className="py-2 pr-4 text-sm" style={{ color: '#555', overflow: 'hidden', wordBreak: 'break-word' }}>

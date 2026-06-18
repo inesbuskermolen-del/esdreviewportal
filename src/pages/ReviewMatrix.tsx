@@ -28,6 +28,14 @@ function getSession(token: string): ReviewerSession | null {
 
 /* ── Helpers ── */
 
+function shortCreditId(id: string): string {
+  return id
+    .replace(/^Management\s+/i, 'M ')
+    .replace(/^Transport\s+/i, 'Tr ')
+    .replace(/^Urban Ecology\s+/i, 'UE ')
+    .replace(/^Innovation\s+/i, 'Inn ')
+}
+
 function getCategoryOrder(creditId: string, category = ''): number {
   const id = creditId.toLowerCase()
   const cat = category.toLowerCase()
@@ -662,7 +670,7 @@ function CreditRow({
       {/* Credit Name — sticky */}
       <td style={{ ...tdBase, position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1 }}>
         <span style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '13px', fontWeight: 500, color: '#2C2C2C' }}>
-          {credit.creditId} {credit.creditName}
+          {shortCreditId(credit.creditId)} {credit.creditName}
         </span>
       </td>
 

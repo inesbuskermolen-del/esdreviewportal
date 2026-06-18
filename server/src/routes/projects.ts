@@ -260,7 +260,8 @@ async function processUploadedPdf(projectId: string, trimmedText: string, origin
     "architect": "string or null",
     "totalDwellings": number or null,
     "buildingLevels": number or null,
-    "siteArea": number or null
+    "siteArea": number or null,
+    "rainwaterTankSize": number or null
   },
   "credits": [
     {
@@ -293,13 +294,14 @@ Rules:
   * null if the building type cannot be determined from the PDF
 - client: the project client/owner name as stated in the PDF (cover page or project info section). Null if not stated.
 - architect: the architect firm or person's name as stated in the PDF. Null if not stated.
-- totalDwellings: total number of residential dwellings/apartments/units from the "Dwellings & Non-Residential Spaces" table (page 3 of BESS). This is the sum of all dwelling types (Studio, 1 Bed, 2 Bed, 3 Bed, etc.). Null if not a residential project or not stated.
+- totalDwellings: total number of residential dwellings/apartments/units from the "Dwellings & Non-Residential Spaces" table (page 3 of BESS). If there is a "Total" row in the table, use that value. Otherwise sum all residential dwelling type rows (Studio, 1 Bed, 2 Bed, 3 Bed, etc.) — do NOT include non-residential rows (Retail, Office, Commercial, etc.). Null if not a residential project or not stated.
 - buildingLevels: number of building levels/storeys from the "Height" column in the Buildings table on page 2 of the BESS PDF (e.g. if the Height cell says "8 Levels" return 8, if it says "8" return 8). Return only the integer count of levels. Null if not found.
 - siteArea: site area in m² from the project inputs section or Buildings table on page 1 or 2 of the BESS PDF (look for the "Site Area" field). Return only the integer number of square metres with no units (e.g. if it says "1,234 m²" return 1234). Null if not found.
+- rainwaterTankSize: rainwater tank storage volume in litres from the Rainwater Tank Profile table (look for "Tank Storage Volume", "Tank Volume", or "Storage Volume" fields). If the value is given in kL, convert to litres (e.g. 2 kL → 2000). Return only the integer number of litres with no units. Null if not found.
 - creditStatus: Achieved → "Y", Not Achieved or 0% → "N", Scoped Out / N/A / Disabled → "ScopedOut"
 - EXCLUDE credits with status Disabled from the credits array entirely
 - creditRequirement: the specific compliance requirement for this credit as stated in the BESS document (e.g. "Provide a minimum of 24 long-stay bicycle spaces"). 1–2 sentences. Null if not stated.
-- rawDataPoints: key numbers and specs only for this credit (e.g. "Required 24 long-stay bicycle spaces + 4 short-stay. Provided 20 long-stay + 2 short-stay." or "WELS 6-star taps, 3-star showers, no rainwater tank. 28% potable water reduction achieved."). 1–2 sentences max. Null if no specific data in PDF for this credit. Exception: for IWM 1.1 (potable water / fixtures), list every fixture type and its WELS star rating on a separate line — do not truncate. Exception: for Innovation credits, list every claimed initiative name and its description on a separate line — do not truncate.
+- rawDataPoints: key numbers and specs only for this credit (e.g. "Required 24 long-stay bicycle spaces + 4 short-stay. Provided 20 long-stay + 2 short-stay." or "WELS 6-star taps, 3-star showers, no rainwater tank. 28% potable water reduction achieved."). 1–2 sentences max. Null if no specific data in PDF for this credit. Exception: for IWM 1.1 (potable water / fixtures), list every fixture type and its WELS star rating on a separate line — do not truncate. Exception: for Innovation credits, list every claimed initiative name and its description on a separate line — do not truncate. Exception: for OE 2.x credits (OE 2.1, OE 2.2, OE 2.6, OE 2.7), extract every row from the "Dwellings & Non-Residential Spaces" table — for each typology list the name, quantity (number of units/tenancies), and total floor area in m² — do not truncate. Format each row as "Typology: N units, Xm² total" (e.g. "1 Bedroom: 20 units, 1100m² total", "Retail: 2 tenancies, 350m² total", "Office: 1 tenancy, 200m² total"). Also add a line "Total residential dwellings: N" summing all residential types only.
 - Return ONLY the JSON object — no markdown, no explanation
 
 BESS text:
@@ -331,6 +333,7 @@ ${trimmedText}`
       totalDwellings?: number
       buildingLevels?: number
       siteArea?: number
+      rainwaterTankSize?: number
     }
     credits: Array<{
       creditId: string
@@ -397,6 +400,7 @@ ${trimmedText}`
       totalDwellings: parsed.project.totalDwellings != null ? parseInt(String(parsed.project.totalDwellings)) : null,
       buildingLevels: parsed.project.buildingLevels != null ? parseInt(String(parsed.project.buildingLevels)) : null,
       siteArea: parsed.project.siteArea != null ? parseInt(String(parsed.project.siteArea)) : null,
+      rainwaterTankSize: parsed.project.rainwaterTankSize != null ? parseInt(String(parsed.project.rainwaterTankSize)) : null,
     },
   })
 
@@ -751,6 +755,7 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
         totalDwellings: true,
         buildingLevels: true,
         siteArea: true,
+        rainwaterTankSize: true,
       },
     })
     if (!project) {

@@ -287,7 +287,14 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     }
 
     // OE 2.6 special case
-    if (/^oe\s+2\.6$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+    if (/^oe\s+2\.6$/i.test(credit.creditId.trim()) && credit.creditStatus === 'ScopedOut') {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'Not targeted.' },
+      })
+      continue
+    }
+    if (/^oe\s+2\.6$/i.test(credit.creditId.trim()) && credit.creditStatus === 'Y') {
       const oe11 = credits.find(c => /^oe\s+1\.1$/i.test(c.creditId.trim()))
       const raw = oe11?.rawDataPoints ?? ''
 
