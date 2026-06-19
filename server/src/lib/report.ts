@@ -44,6 +44,8 @@ export interface ReportCreditData {
   creditStatus: string
   rawDataPoints: string | null
   category: string
+  commentsGIW?: string | null
+  reviewerComments?: string[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -325,6 +327,22 @@ async function getWordFillData(
     .map(c => `${c.creditId}: ${c.creditStatus}`)
     .join('\n')
 
+  // GIW comments and reviewer feedback for credits whose descriptions come from commentsGIW
+  const GIW_DESC_CREDIT_IDS = ['ieq 3.2', 'ieq 3.4', 'iwm 2.1']
+  const giwCommentSection = (() => {
+    const relevant = credits.filter(c =>
+      GIW_DESC_CREDIT_IDS.includes(c.creditId.toLowerCase().replace(/\s+/g, ' ')) && c.commentsGIW?.trim()
+    )
+    if (!relevant.length) return ''
+    const lines = relevant.map(c => {
+      const reviewer = c.reviewerComments?.length
+        ? `\n  REVIEWER COMMENTS: ${c.reviewerComments.join(' | ')}`
+        : ''
+      return `${c.creditId} GIW Comment:\n${c.commentsGIW}${reviewer}`
+    })
+    return '\nGIW COMMENTS (source of truth for these descriptions):\n' + lines.join('\n\n')
+  })()
+
   // Dynamic [XX] position list extracted from this specific template
   const xxPositionList = xxOccurrences
     .map((ctx, i) => `${i + 1}. ${ctx}`)
@@ -347,7 +365,7 @@ PROJECT DATA:
 
 BESS CREDIT DATA (creditId | status | rawDataPoints):
 ${creditSummary || 'No credit data available'}
-
+${giwCommentSection}
 ALL BESS CREDITS AND STATUSES (for row deletion):
 ${allCreditStatus || 'No credit data available'}
 
@@ -396,12 +414,14 @@ RULES FOR DETERMINING [XX] VALUES (match by paragraph context above):
 - vegetation % of site area → from Urban Ecology rawDataPoints; return just the number
 - "food production" area m2 → from Urban Ecology rawDataPoints; return just the number
 - "litre rainwater tank" / "directed into the … litre rainwater tank" → use PROJECT DATA rainwaterTankSize; return just the number
-- "to utilise [XX]" hot water system → from OE 2.x rawDataPoints; return ONLY a full descriptive phrase e.g. 'a heat pump hot water system', 'a centralised gas hot water system', 'individual electric instantaneous hot water systems' — NEVER a number or count
+- "to utilise [XX]" hot water system → from OE 3.x rawDataPoints "Type of Hot Water System: X" field; return ONLY a full descriptive phrase e.g. 'a heat pump hot water system', 'a centralised gas hot water system', 'individual electric instantaneous hot water systems' — NEVER a number or count
 - solar generation kWh ("generate approximately [XX]kWh") → from OE 4.x rawDataPoints; return just the number
 - "[XX]% of Living areas" daylight → from IEQ 1.x rawDataPoints; return just the % number
 - "[XX]% of Bedrooms" daylight → from IEQ 1.x rawDataPoints; return just the % number
 - non-residential ventilation description ("Ventilation – Non-Residential") → from IEQ 2.3 rawDataPoints; describe approach in one sentence
 - ceiling fans % ("regular use areas") → from IEQ rawDataPoints; return just the number
+- thermal comfort shading bullet points ("• [XX]" occurring after "shading to the following areas" paragraph) → from the IEQ 3.2 or IEQ 3.4 GIW Comment in the GIW COMMENTS section above; parse the bullet-point lines (lines starting with "•" or "-") and assign one location description per [XX] slot (strip the bullet prefix); if fewer bullets than [XX] slots, repeat the last bullet; if no GIW comment exists, return "[XX]"
+- Stormwater Treatment / Blue Factor description ([XX] values in Blue Factor / stormwater / rainwater-tank context for IWM 2.1) → from the IWM 2.1 GIW Comment in the GIW COMMENTS section above; if the comment contains multiple options (Option 1, Option 2, etc.), use REVIEWER COMMENTS to select the correct option, then fill each [XX] from the values in that option's text; if only one option or no reviewer comment, use Option 1 / the full comment text; extract specific values (roof areas, tank size, toilet count, raingarden size) to fill each [XX]
 - resident bicycle spaces → from Transport rawDataPoints; return just the number
 - residential visitor bicycle spaces → from Transport rawDataPoints; return just the number
 - employee bicycle spaces → from Transport rawDataPoints; return just the number
@@ -522,8 +542,14 @@ function formatBESSPercentage(raw: string, totalApts: number | null): string | n
   return null
 }
 
-/** Combine rawDataPoints from all OE 2.x credits (dwelling profile section). */
+/** Return rawDataPoints from OE 3.x credits (hot water profile), falling back to OE 2.x. */
 function getHotWaterRaw(credits: ReportCreditData[]): string {
+  const oe3 = credits
+    .filter(c => /^oe\s*3/i.test(c.creditId))
+    .map(c => c.rawDataPoints ?? '')
+    .filter(Boolean)
+    .join(' ')
+  if (oe3) return oe3
   return credits
     .filter(c => /^oe\s*2/i.test(c.creditId))
     .map(c => c.rawDataPoints ?? '')
@@ -533,6 +559,27 @@ function getHotWaterRaw(credits: ReportCreditData[]): string {
 
 function extractHwDescription(raw: string): string | null {
   const r = raw.toLowerCase()
+
+  // Prefer explicit "Type of Hot Water System: X" from BESS — use X verbatim (lowercased)
+  const typeMatch = raw.match(/type of hot water system\s*:\s*([^\n.;]+)/i)
+  if (typeMatch) {
+    const bType = typeMatch[1].trim().toLowerCase()
+    // Map known BESS dropdown values to report phrasing
+    if (/individual.*electric.*instant|electric.*instant/i.test(bType)) return 'individual electric instantaneous hot water systems'
+    if (/individual.*electric.*storage/i.test(bType)) return 'individual electric storage hot water systems'
+    if (/individual.*gas.*instant|gas.*instant/i.test(bType)) return 'individual gas instantaneous hot water systems'
+    if (/individual.*gas.*storage/i.test(bType)) return 'individual gas storage hot water systems'
+    if (/central.*heat pump|heat pump.*central/i.test(bType)) return 'a centralised heat pump hot water system'
+    if (/heat pump/i.test(bType)) return 'a heat pump hot water system'
+    if (/(central|communal).*gas|gas.*(central|communal)/i.test(bType)) return 'a centralised gas hot water system'
+    if (/solar.*gas backup|solar.*gas/i.test(bType)) return 'a solar hot water system with gas backup'
+    if (/solar.*electric backup|solar.*electric/i.test(bType)) return 'a solar hot water system with electric backup'
+    if (/solar/i.test(bType)) return 'a solar hot water system'
+    if (/individual.*gas/i.test(bType)) return 'individual gas hot water systems'
+    if (/individual.*electric/i.test(bType)) return 'individual electric hot water systems'
+    // Fall through to generic keyword matching below if no pattern matched
+  }
+
   if (/heat pump/.test(r)) return 'a heat pump hot water system'
   if (/(central|communal|common).*gas|gas.*(central|communal)/.test(r)) return 'a centralised gas hot water system'
   if (/solar/.test(r)) return 'a solar hot water system'
@@ -1052,6 +1099,37 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
           const combined = texts.join('')
           if (!combined.includes('[XX]') || !/ventilation/i.test(combined)) return para
           return para.replace(/(<w:t[^>]*>)([^<]*)\[XX\]([^<]*)(<\/w:t>)/, `$1$2${escapedVent}$3$4`)
+        })
+      }
+    }
+  }
+
+  // ── IEQ 3.2 / 3.4: Thermal comfort shading — bullet-point fallback ─────────
+  // If Claude left "• [XX]" bullet placeholders unfilled, patch them from commentsGIW.
+  {
+    const shadingCredit = findCredit(credits, 'ieq 3.2') ?? findCredit(credits, 'ieq 3.4')
+    if (shadingCredit?.commentsGIW && xml.includes('[XX]')) {
+      const bullets = shadingCredit.commentsGIW
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => /^[•\-*]/.test(l))
+        .map(l => l.replace(/^[•\-*]\s*/, '').trim())
+        .filter(Boolean)
+
+      if (bullets.length > 0) {
+        let bulletIdx = 0
+        let inShadingSection = false
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          const texts: string[] = []
+          const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+          let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (/shading to the following areas/i.test(combined)) { inShadingSection = true; return para }
+          if (!inShadingSection || !combined.includes('[XX]')) return para
+          if (bulletIdx >= bullets.length) return para
+          const replacement = escapeXml(bullets[bulletIdx++])
+          return para.replace(/(<w:t[^>]*>)([^<]*)\[XX\]([^<]*)(<\/w:t>)/, `$1$2${replacement}$3$4`)
         })
       }
     }
@@ -2132,19 +2210,9 @@ async function fillWordTemplate(
 
   // ── Hot water system dropdown ─────────────────────────────────────────────
   {
-    const raw = getHotWaterRaw(credits).toLowerCase()
-    let hwItem: string
-    if (raw.includes('heat pump')) {
-      hwItem = 'a heat pump hot water system'
-    } else if (raw.includes('gas') && (raw.includes('central') || raw.includes('communal'))) {
-      hwItem = 'a centralised gas hot water system'
-    } else if (raw.includes('gas')) {
-      hwItem = 'individual gas hot water systems'
-    } else if (raw.includes('electric') || raw.includes('instantaneous')) {
-      hwItem = 'individual electric instantaneous hot water systems'
-    } else {
-      hwItem = 'a heat pump hot water system' // sensible default
-    }
+    const hwRaw = getHotWaterRaw(credits)
+    const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
+    const hwItem = extractHwDescription(hwRaw) ?? extractHwDescription(allRaw) ?? 'a heat pump hot water system'
     renderedXml = setDropdownContent(renderedXml, 'a centralised gas hot water system', hwItem)
   }
 

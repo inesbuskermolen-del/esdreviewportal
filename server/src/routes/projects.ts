@@ -301,7 +301,7 @@ Rules:
 - creditStatus: Achieved → "Y", Not Achieved or 0% → "N", Scoped Out / N/A / Disabled → "ScopedOut"
 - EXCLUDE credits with status Disabled from the credits array entirely
 - creditRequirement: the specific compliance requirement for this credit as stated in the BESS document (e.g. "Provide a minimum of 24 long-stay bicycle spaces"). 1–2 sentences. Null if not stated.
-- rawDataPoints: key numbers and specs only for this credit (e.g. "Required 24 long-stay bicycle spaces + 4 short-stay. Provided 20 long-stay + 2 short-stay." or "WELS 6-star taps, 3-star showers, no rainwater tank. 28% potable water reduction achieved."). 1–2 sentences max. Null if no specific data in PDF for this credit. Exception: for IWM 1.1 (potable water / fixtures), list every fixture type and its WELS star rating on a separate line — do not truncate. Exception: for Innovation credits, list every claimed initiative name and its description on a separate line — do not truncate. Exception: for OE 2.x credits (OE 2.1, OE 2.2, OE 2.6, OE 2.7), extract every row from the "Dwellings & Non-Residential Spaces" table — for each typology list the name, quantity (number of units/tenancies), and total floor area in m² — do not truncate. Format each row as "Typology: N units, Xm² total" (e.g. "1 Bedroom: 20 units, 1100m² total", "Retail: 2 tenancies, 350m² total", "Office: 1 tenancy, 200m² total"). Also add a line "Total residential dwellings: N" summing all residential types only.
+- rawDataPoints: key numbers and specs only for this credit (e.g. "Required 24 long-stay bicycle spaces + 4 short-stay. Provided 20 long-stay + 2 short-stay." or "WELS 6-star taps, 3-star showers, no rainwater tank. 28% potable water reduction achieved."). 1–2 sentences max. Null if no specific data in PDF for this credit. Exception: for IWM 1.1 (potable water / fixtures), list every fixture type and its WELS star rating on a separate line — do not truncate. Exception: for Innovation credits, list every claimed initiative name and its description on a separate line — do not truncate. Exception: for OE 2.x credits (OE 2.1, OE 2.2, OE 2.6, OE 2.7), extract every row from the "Dwellings & Non-Residential Spaces" table — for each typology list the name, quantity (number of units/tenancies), and total floor area in m² — do not truncate. Format each row as "Typology: N units, Xm² total" (e.g. "1 Bedroom: 20 units, 1100m² total", "Retail: 2 tenancies, 350m² total", "Office: 1 tenancy, 200m² total"). Also add a line "Total residential dwellings: N" summing all residential types only. Exception: for OE 3.1 and OE 3.2 (hot water) credits, always begin rawDataPoints with the exact text of the "Type of Hot Water System" field from the BESS assessment formatted as "Type of Hot Water System: [exact value as shown in BESS]", then any other key specs.
 - Return ONLY the JSON object — no markdown, no explanation
 
 BESS text:
@@ -763,10 +763,23 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
       return
     }
 
-    const credits = await prisma.credit.findMany({
+    const rawCredits = await prisma.credit.findMany({
       where: { projectId: req.params.id, deletedByGIW: false },
-      select: { creditId: true, creditName: true, creditStatus: true, rawDataPoints: true, category: true },
+      select: {
+        creditId: true, creditName: true, creditStatus: true,
+        rawDataPoints: true, category: true, commentsGIW: true,
+        comments: { select: { commentText: true } },
+      },
     })
+    const credits = rawCredits.map(c => ({
+      creditId: c.creditId,
+      creditName: c.creditName,
+      creditStatus: c.creditStatus,
+      rawDataPoints: c.rawDataPoints,
+      category: c.category,
+      commentsGIW: c.commentsGIW,
+      reviewerComments: c.comments.map(cm => cm.commentText),
+    }))
 
     const { client, architect, giwref } = req.body as { client?: string; architect?: string; giwref?: string }
     const { wordBuffer, excelBuffer, wordFilename, excelFilename } = await generateSMPReport(
