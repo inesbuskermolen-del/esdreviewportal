@@ -2037,7 +2037,7 @@ async function fillWordTemplate(
   // match whatever value (number or leftover [XX]) already sits in that slot.
   if (project.bessScore != null) {
     const score = String(Math.round(project.bessScore))
-    renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
       const texts: string[] = []
       const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
       let m: RegExpExecArray | null
@@ -2331,7 +2331,7 @@ async function fillWordTemplate(
     // DTS pathway: replace criteria table intro with DTS sentence, delete % result lines
     if (usedDTS) {
       const dtsSentence = 'The development complies with the BESS Deemed-to-Satisfy method for Daylight.'
-      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
         const texts: string[] = []
         const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
         let m: RegExpExecArray | null
@@ -2348,7 +2348,7 @@ async function fillWordTemplate(
     // Built-in calculator pathway: replace criteria table intro only (% lines remain)
     if (usedBuiltIn) {
       const builtInSentence = 'The BESS built-in daylight calculator has been used to assess compliance. The summary result is as follows:'
-      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
         const texts: string[] = []
         const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
         let m: RegExpExecArray | null
@@ -2438,7 +2438,7 @@ async function fillWordTemplate(
   // ── WELS star rating: strip [N] brackets left by Docxtemplater nullGetter ──
   // The template has [4]/[5] as tag-delimited placeholders (e.g. "WELS [4] Star - Toilets").
   // Each bracket is a separate run, so applyParaChanges handles the split correctly.
-  renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+  renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
     const texts: string[] = []
     const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
     let m: RegExpExecArray | null
