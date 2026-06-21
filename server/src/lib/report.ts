@@ -142,6 +142,7 @@ interface FillData {
   placeholders: PlaceholderValues
   rowsToDelete: string[]
   council: string | null
+  namedValues: Record<string, string>
 }
 
 /** Extract readable text from the first <w:tc> cell of a table row XML fragment. */
@@ -390,7 +391,63 @@ For "council": return the EXACT council name from the list above that matches th
   "7.0": [<all the same NatHERS star rating, e.g. "7.5" — one per [7.0] occurrence>],
   "XX% (XX out of XX)": [<values in document order — one per [XX% (XX out of XX)] occurrence>],
   "council": "City of Yarra",
-  "rowsToDelete": ["exact criteria name 1", "exact criteria name 2", ...]
+  "rowsToDelete": ["exact criteria name 1", "exact criteria name 2", ...],
+  "namedValues": {
+    "total retail": "<number of retail tenancies from OE 2.x or null>",
+    "Total Retail": "<same as total retail>",
+    "total office": "<number of office tenancies from OE 2.x or null>",
+    "Total Office": "<same as total office>",
+    "total area retail": "<total retail floor area m² from OE 2.x or null>",
+    "Total area retail": "<same as total area retail>",
+    "total area office": "<total office floor area m² from OE 2.x or null>",
+    "Total area office": "<same as total area office>",
+    "distance to CBD": "<distance in km from project address to Melbourne CBD based on your knowledge of Melbourne geography>",
+    "Distance to CBD": "<same as distance to CBD>",
+    "toilet WELS": "<toilet WELS star rating from IWM 1.1 or null>",
+    "Toilet WELS": "<same as toilet WELS>",
+    "taps WELS": "<tap WELS star rating from IWM 1.1 or null>",
+    "Taps WELS": "<same as taps WELS>",
+    "shower WELS": "<shower WELS star rating from IWM 1.1 or null>",
+    "Shower WELS": "<same as shower WELS>",
+    "Dishwasher WELS": "<dishwasher WELS star rating from IWM 1.1 or null>",
+    "Average star rating": "<average WELS star rating from IWM 1.1, e.g. '4.0', or null>",
+    "DTS improvement": "<thermal performance improvement % above minimum from OE 1.x e.g. '15%', or null>",
+    "Hot water": "<hot water system description e.g. 'a heat pump hot water system' from OE 3.x, or null>",
+    "solar PV": "<solar PV system size as 'X kW' from OE 4.x, or null>",
+    "Solar PV": "<same as solar PV>",
+    "Solar PV output": "<annual solar generation in kWh (number only) from OE 4.x, or null>",
+    "Solar output": "<same as Solar PV output>",
+    "daylight living": "<% of living areas with adequate daylight from IEQ 1.x e.g. '75%', or null>",
+    "daylight bedrooms": "<% of bedrooms with adequate daylight from IEQ 1.x e.g. '65%', or null>",
+    "daylight non-resi": "<% of non-residential areas with adequate daylight from IEQ rawDataPoints e.g. '60%', or null>",
+    "natural ventilation% (XX out of XX)": "<cross-ventilation formatted as 'N% (X out of Y)' from IEQ 2.3, or null>",
+    "winter sunlight% (XX out of XX)": "<winter sunlight formatted as 'N% (X out of Y)' from IEQ 1.3, or null>",
+    "ventilation non-resi": "<non-residential ventilation approach in one sentence from IEQ 2.3, or null>",
+    "Ventilation Non-Resi": "<same as ventilation non-resi>",
+    "Shading": "<shading description for residential from IEQ 3.2 or IEQ 3.4 GIW Comment — parse bullet points into a combined sentence, or null>",
+    "Shading non-resi": "<shading description for non-residential areas from IEQ GIW comments, or null>",
+    "fans": "<% of regular-use areas with ceiling fans from IEQ rawDataPoints (number only), or null>",
+    "Fans": "<same as fans>",
+    "residential bikes": "<long-stay/residential bicycle spaces from Transport rawDataPoints, or null>",
+    "residential visitor bikes": "<short-stay/visitor residential bicycle spaces from Transport rawDataPoints, or null>",
+    "employee bikes": "<employee bicycle spaces from Transport rawDataPoints, or null>",
+    "Employee bikes": "<same as employee bikes>",
+    "commercial visitor bikes": "<commercial visitor bicycle spaces from Transport rawDataPoints, or null>",
+    "visitor bikes": "<same as commercial visitor bikes>",
+    "EOT showers": "<end-of-trip showers from Transport rawDataPoints, or null>",
+    "EOT lockers": "<end-of-trip lockers from Transport rawDataPoints, or null>",
+    "motorbikes": "<motorbike spaces from Transport rawDataPoints, or null>",
+    "Motorbikes": "<same as motorbikes>",
+    "communal area": "<communal open space area m² (number only) from rawDataPoints, or null>",
+    "Communal area": "<same as communal area>",
+    "vegetation": "<vegetation/permeable coverage % of site (number only) from Urban Ecology rawDataPoints, or null>",
+    "Vegetation": "<same as vegetation>",
+    "food production area": "<food production garden area m² (number only) from Urban Ecology rawDataPoints, or null>",
+    "Food production": "<same as food production area>",
+    "Blue Factor score": "<Blue Factor stormwater quality score from IWM 2.1 rawDataPoints or GIW comments, or null>",
+    "collection area": "<rainwater catchment/collection area m² from IWM 2.1 rawDataPoints or GIW comments, or null>",
+    "raingarden size": "<rain garden area m² from IWM 2.1 rawDataPoints or GIW comments, or null>"
+  }
 }
 
 [XX] OCCURRENCES IN THIS TEMPLATE — ${xxOccurrences.length} total, in document order.
@@ -467,12 +524,23 @@ Return ONLY the JSON, no explanation.`
     console.log(`[report] Claude filled ${xxVals.length} [XX] positions (template has ${xxOccurrences.length})`)
     console.log('[report] Claude XX values:', JSON.stringify(xxVals))
     console.log('[report] Claude XX% (XX out of XX) values:', xxPctVals)
+    // Extract named values — filter out null/empty strings from Claude's response
+    const rawNamed = (typeof parsed.namedValues === 'object' && parsed.namedValues !== null)
+      ? parsed.namedValues as Record<string, unknown>
+      : {}
+    const namedValues: Record<string, string> = {}
+    for (const [k, v] of Object.entries(rawNamed)) {
+      if (v != null && String(v).trim() !== '' && String(v) !== 'null') {
+        namedValues[k] = String(v)
+      }
+    }
     delete parsed.rowsToDelete
     delete parsed.council
-    return { placeholders: parsed as PlaceholderValues, rowsToDelete, council }
+    delete parsed.namedValues
+    return { placeholders: parsed as PlaceholderValues, rowsToDelete, council, namedValues }
   } catch {
     console.error('[report] Claude fill-data response was not valid JSON:', jsonText.slice(0, 500))
-    return { placeholders: {}, rowsToDelete: [], council: null }
+    return { placeholders: {}, rowsToDelete: [], council: null, namedValues: {} }
   }
 }
 
@@ -1966,7 +2034,21 @@ async function fillWordTemplate(
   zip.file('word/document.xml', escapedDocXml)
 
   // Ask Claude to fill all [XX], [XXX], etc. and decide which rows to delete
-  const { placeholders, rowsToDelete, council } = await getWordFillData(project, credits, paragraphs, criteriaNames, xxOccurrences)
+  const { placeholders, rowsToDelete, council, namedValues } = await getWordFillData(project, credits, paragraphs, criteriaNames, xxOccurrences)
+
+  // Authoritative database fields always override Claude's named values
+  const dbNameMap: Array<[string[], string | null]> = [
+    [['total apartments'], project.totalDwellings != null ? String(project.totalDwellings) : null],
+    [['building height', 'Building Height'], project.buildingLevels != null ? String(project.buildingLevels) : null],
+    [['site area', 'Sit area'], project.siteArea != null ? String(project.siteArea) : null],
+    [['BESS score'], project.bessScore != null ? String(Math.round(project.bessScore)) : null],
+    [['rainwater tank size'], project.rainwaterTankSize != null ? String(project.rainwaterTankSize) : null],
+  ]
+  for (const [keys, val] of dbNameMap) {
+    if (val != null) {
+      for (const k of keys) namedValues[k] = val
+    }
+  }
 
   // Per-occurrence counters for generic tags
   const counters: Record<string, number> = {}
@@ -1999,6 +2081,12 @@ async function fillWordTemplate(
             '[SMP Visualisation chart — open the attached Excel, copy range C2:U25 and paste as image here]',
         }
         if (namedFallbacks[tag] !== undefined) return namedFallbacks[tag]
+
+        // Check named values (case-insensitive) — covers all new named placeholders in MixUse/Comm templates
+        const tagKey = tag.trim().toLowerCase()
+        for (const [k, v] of Object.entries(namedValues)) {
+          if (k.trim().toLowerCase() === tagKey) return v
+        }
 
         counters[tag] = (counters[tag] ?? 0) + 1
         const idx = counters[tag] - 1
