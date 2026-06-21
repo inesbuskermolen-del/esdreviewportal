@@ -296,7 +296,7 @@ Rules:
 - architect: the architect firm or person's name as stated in the PDF. Null if not stated.
 - totalDwellings: total number of residential dwellings/apartments/units from the "Dwellings & Non-Residential Spaces" table (page 3 of BESS). If there is a "Total" row in the table, use that value. Otherwise sum all residential dwelling type rows (Studio, 1 Bed, 2 Bed, 3 Bed, etc.) — do NOT include non-residential rows (Retail, Office, Commercial, etc.). Null if not a residential project or not stated.
 - buildingLevels: number of building levels/storeys from the "Height" column in the Buildings table on page 2 of the BESS PDF (e.g. if the Height cell says "8 Levels" return 8, if it says "8" return 8). Return only the integer count of levels. Null if not found.
-- siteArea: site area in m² from the project inputs section or Buildings table on page 1 or 2 of the BESS PDF (look for the "Site Area" field). Return only the integer number of square metres with no units (e.g. if it says "1,234 m²" return 1234). Null if not found.
+- siteArea: site area in m² from the BESS PDF. In BESS the site area appears in the Buildings table (a row or column labelled "Site Area" with a value in m²), sometimes also on the cover page or project inputs section. Return only the integer number of square metres with no units (e.g. if it says "3,356 m²" return 3356, if it says "1234" return 1234). Return null — never 0 — if the value cannot be clearly identified in the document.
 - rainwaterTankSize: rainwater tank storage volume in litres from the Rainwater Tank Profile table (look for "Tank Storage Volume", "Tank Volume", or "Storage Volume" fields). If the value is given in kL, convert to litres (e.g. 2 kL → 2000). Return only the integer number of litres with no units. Null if not found.
 - creditStatus: Achieved → "Y", Not Achieved or 0% → "N", Scoped Out / N/A / Disabled → "ScopedOut"
 - EXCLUDE credits with status Disabled from the credits array entirely
@@ -789,11 +789,11 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
       reviewerComments: c.comments.map(cm => cm.commentText),
     }))
 
-    const { client, architect, giwref, siteArea: siteAreaOverride } = req.body as { client?: string; architect?: string; giwref?: string; siteArea?: number }
+    const { client, architect, giwref } = req.body as { client?: string; architect?: string; giwref?: string }
     const { wordBuffer, excelBuffer, wordFilename, excelFilename } = await generateSMPReport(
       project,
       credits,
-      { client, architect, giwref, siteArea: siteAreaOverride != null ? Number(siteAreaOverride) : undefined },
+      { client, architect, giwref },
     )
 
     const safeName = project.name.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')

@@ -950,8 +950,8 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
   {
     // Primary: stored siteArea field extracted from the BESS PDF during upload
     // Fallback: regex scan of rawDataPoints (Urban Ecology / IWM credits sometimes mention it)
-    let siteVal: string | null = project.siteArea != null ? String(project.siteArea) : null
-    if (!siteVal) {
+    let siteVal: string | null = (project.siteArea != null && project.siteArea !== 0) ? String(project.siteArea) : null
+    if (siteVal === null) {
       const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
       const siteMatch = allRaw.match(/site\s+area[^:]*:?\s*([\d,]+)\s*m/i) ??
                         allRaw.match(/([\d,]+)\s*m2?\s+site/i) ??
@@ -959,7 +959,7 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
                         allRaw.match(/site[^:]*:\s*([\d,]+)/i)
       siteVal = siteMatch ? siteMatch[1].replace(/,/g, '') : null
     }
-    if (siteVal) {
+    if (siteVal !== null) {
       const val = siteVal
       // Inline prose: "surface area of [XX]"
       for (const kw of ['surface area of', 'site area of', 'area of']) {
@@ -2708,7 +2708,7 @@ function inferTypology(credits: ReportCreditData[]): string | null {
 export async function generateSMPReport(
   project: ReportProjectData,
   credits: ReportCreditData[],
-  overrides?: { client?: string; architect?: string; giwref?: string; totalDwellings?: number; siteArea?: number },
+  overrides?: { client?: string; architect?: string; giwref?: string; totalDwellings?: number },
 ): Promise<{
   wordBuffer: Buffer
   excelBuffer: Buffer
@@ -2758,9 +2758,8 @@ export async function generateSMPReport(
 
   // Override wins; then fall back to what was stored on the project record
   const resolvedTotalDwellings = overrides?.totalDwellings ?? project.totalDwellings ?? null
-  const resolvedSiteArea = overrides?.siteArea ?? project.siteArea ?? null
 
-  const projectWithFormattedAddress = { ...project, address: formattedAddress, totalDwellings: resolvedTotalDwellings, siteArea: resolvedSiteArea }
+  const projectWithFormattedAddress = { ...project, address: formattedAddress, totalDwellings: resolvedTotalDwellings }
 
   const excelBuffer = typology === 'Non-Residential'
     ? fillExcelNonResidential(excelTemplatePath, projectWithFormattedAddress, credits)
