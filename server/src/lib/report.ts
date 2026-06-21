@@ -2065,7 +2065,8 @@ async function fillWordTemplate(
   // [Shading] / [shading] are standalone paragraph tags filled from commentsGIW.
   // Claude's extraction is unreliable for this — always override with direct parsing.
   {
-    const shadingCredit = findCredit(credits, 'ieq 3.2') ?? findCredit(credits, 'ieq 3.4')
+    const shadingCredit = findCreditLike(credits, 'ieq 3.2') ?? findCreditLike(credits, 'ieq 3.4')
+    console.log('[report] Shading credit found:', shadingCredit?.creditId ?? 'none', '| commentsGIW length:', shadingCredit?.commentsGIW?.length ?? 0)
     if (shadingCredit?.commentsGIW?.trim()) {
       const comment = shadingCredit.commentsGIW.trim()
       const bullets = comment
@@ -2079,7 +2080,7 @@ async function fillWordTemplate(
         namedValues['Shading'] = shadingDesc
         namedValues['shading'] = shadingDesc
         if (!namedValues['Shading non-resi']) namedValues['Shading non-resi'] = shadingDesc
-        console.log('[report] Shading from GIW comment:', shadingDesc.slice(0, 80))
+        console.log('[report] Shading set from GIW comment:', shadingDesc.slice(0, 120))
       }
     }
   }
@@ -2088,7 +2089,8 @@ async function fillWordTemplate(
   // Blue Factor score, collection area, and raingarden size come from IWM 2.1
   // commentsGIW (or rawDataPoints as fallback). Only fills gaps Claude left empty.
   {
-    const iwm21 = findCredit(credits, 'iwm 2.1')
+    const iwm21 = findCreditLike(credits, 'iwm 2.1')
+    console.log('[report] IWM 2.1 credit found:', iwm21?.creditId ?? 'none', '| commentsGIW length:', iwm21?.commentsGIW?.length ?? 0, '| rawDataPoints length:', iwm21?.rawDataPoints?.length ?? 0)
     const iwm21Comment = iwm21?.commentsGIW?.trim() ?? ''
     const iwm21Raw = iwm21?.rawDataPoints?.trim() ?? ''
     const searchText = iwm21Comment || iwm21Raw
@@ -2202,26 +2204,6 @@ async function fillWordTemplate(
   const rawXml = renderedZip.file('word/document.xml')!.asText()
   // Restore escaped long-form brackets (full-width → ASCII)
   let renderedXml = rawXml.replace(/［/g, '[').replace(/］/g, ']')
-
-  // ── BESS score — must run before shielding because the text lives inside the
-  // Key ESD Initiatives table (which is shielded from all later post-processing).
-  // The template uses [XX]% which Docxtemplater fills before we get here, so we
-  // match whatever value (number or leftover [XX]) already sits in that slot.
-  if (project.bessScore != null) {
-    const score = String(Math.round(project.bessScore))
-    renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
-      const texts: string[] = []
-      const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
-      let m: RegExpExecArray | null
-      while ((m = re.exec(para)) !== null) texts.push(m[1])
-      const combined = texts.join('')
-      if (!/BESS\s+score/i.test(combined)) return para
-      const hit = combined.match(/BESS\s+score\s+of\s+(\[XX\]|\d+(?:\.\d+)?)\s*%/i)
-      if (!hit || hit.index === undefined) return para
-      const tokenStart = hit.index + hit[0].indexOf(hit[1])
-      return applyParaChanges(para, [{ pos: tokenStart, len: hit[1].length, replacement: score }])
-    })
-  }
 
   // ── OE 1.1 thermal % — must run before shielding so the Key ESD Initiatives
   // table row ("Thermal Performance Rating – Non-Residential") is also cleaned.
