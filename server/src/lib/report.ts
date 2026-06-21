@@ -446,7 +446,11 @@ For "council": return the EXACT council name from the list above that matches th
     "Food production": "<same as food production area>",
     "Blue Factor score": "<Blue Factor stormwater quality score from IWM 2.1 rawDataPoints or GIW comments, or null>",
     "collection area": "<rainwater catchment/collection area m² from IWM 2.1 rawDataPoints or GIW comments, or null>",
-    "raingarden size": "<rain garden area m² from IWM 2.1 rawDataPoints or GIW comments, or null>"
+    "raingarden size": "<rain garden area m² from IWM 2.1 rawDataPoints or GIW comments, or null>",
+    "raingarden area": "<same as raingarden size>",
+    "tap WELS": "<same as taps WELS — tap WELS star rating from IWM 1.1 or null>",
+    "total townhouses": "<total number of townhouses from OE 2.x rawDataPoints or null>",
+    "orientation% (XX out of XX)": "<percentage of townhouses with good solar orientation formatted as 'N% (X out of Y)' from IEQ 1.3 rawDataPoints, or null>"
   }
 }
 
@@ -2038,7 +2042,7 @@ async function fillWordTemplate(
 
   // Authoritative database fields always override Claude's named values
   const dbNameMap: Array<[string[], string | null]> = [
-    [['total apartments'], project.totalDwellings != null ? String(project.totalDwellings) : null],
+    [['total apartments', 'total townhouses'], project.totalDwellings != null ? String(project.totalDwellings) : null],
     [['building height', 'Building Height'], project.buildingLevels != null ? String(project.buildingLevels) : null],
     [['site area', 'Sit area'], project.siteArea != null ? String(project.siteArea) : null],
     [['BESS score'], project.bessScore != null ? String(Math.round(project.bessScore)) : null],
