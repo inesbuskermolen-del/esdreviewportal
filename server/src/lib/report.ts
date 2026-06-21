@@ -70,6 +70,13 @@ function extractNumber(text: string, patterns: RegExp[]): number | null {
   return null
 }
 
+/** Add thousands comma to plain integers > 999 (e.g. 3356 → "3,356"). Leaves decimals and small numbers unchanged. */
+function formatNum(val: string): string {
+  const t = val.trim()
+  if (/^\d{4,}$/.test(t)) return parseInt(t, 10).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return val
+}
+
 function extractText(text: string, patterns: RegExp[]): string | null {
   for (const p of patterns) {
     const m = text.match(p)
@@ -797,7 +804,7 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
 
   // ── Rainwater tank size ───────────────────────────────────────────────────
   if (project.rainwaterTankSize != null) {
-    const tankStr = String(project.rainwaterTankSize)
+    const tankStr = formatNum(String(project.rainwaterTankSize))
     // Fill all [XXX] occurrences (Key ESD Initiatives table, SMP details, appendix)
     xml = xml.replace(/\[XXX\]/g, tankStr)
     // Correct the [XX] "directed into the X litre rainwater tank" sentence —
@@ -819,7 +826,7 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
 
   // ── Apartments count ─────────────────────────────────────────────────────
   if (totalApts !== null) {
-    const aptStr = String(totalApts)
+    const aptStr = formatNum(String(totalApts))
     // Replace the apartment count whether Claude filled a wrong number or left [XX] unfilled.
     // The keyword guard (aptKws) ensures we only touch the project description sentence.
     const aptKws = ['will include', 'comprises', 'containing', 'consist of', 'development of']
@@ -1022,7 +1029,7 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
   {
     // Primary: stored siteArea field extracted from the BESS PDF during upload
     // Fallback: regex scan of rawDataPoints (Urban Ecology / IWM credits sometimes mention it)
-    let siteVal: string | null = (project.siteArea != null && project.siteArea !== 0) ? String(project.siteArea) : null
+    let siteVal: string | null = (project.siteArea != null && project.siteArea !== 0) ? formatNum(String(project.siteArea)) : null
     if (siteVal === null) {
       const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
       const siteMatch = allRaw.match(/site\s+area[^:]*:?\s*([\d,]+)\s*m/i) ??
@@ -2054,6 +2061,79 @@ async function fillWordTemplate(
     }
   }
 
+  // ── Shading: code-level extraction from IEQ 3.2 / 3.4 GIW comment ──────────
+  // [Shading] / [shading] are standalone paragraph tags filled from commentsGIW.
+  // Claude's extraction is unreliable for this — always override with direct parsing.
+  {
+    const shadingCredit = findCredit(credits, 'ieq 3.2') ?? findCredit(credits, 'ieq 3.4')
+    if (shadingCredit?.commentsGIW?.trim()) {
+      const comment = shadingCredit.commentsGIW.trim()
+      const bullets = comment
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => /^[•\-*]/.test(l))
+        .map(l => l.replace(/^[•\-*]\s*/, '').trim())
+        .filter(Boolean)
+      const shadingDesc = bullets.length > 0 ? bullets.join(' ') : comment
+      if (shadingDesc) {
+        namedValues['Shading'] = shadingDesc
+        namedValues['shading'] = shadingDesc
+        if (!namedValues['Shading non-resi']) namedValues['Shading non-resi'] = shadingDesc
+        console.log('[report] Shading from GIW comment:', shadingDesc.slice(0, 80))
+      }
+    }
+  }
+
+  // ── IWM 2.1: code-level extraction of stormwater values from GIW comment ─────
+  // Blue Factor score, collection area, and raingarden size come from IWM 2.1
+  // commentsGIW (or rawDataPoints as fallback). Only fills gaps Claude left empty.
+  {
+    const iwm21 = findCredit(credits, 'iwm 2.1')
+    const iwm21Comment = iwm21?.commentsGIW?.trim() ?? ''
+    const iwm21Raw = iwm21?.rawDataPoints?.trim() ?? ''
+    const searchText = iwm21Comment || iwm21Raw
+
+    if (searchText) {
+      // When multiple options exist, pick based on reviewer selection
+      let workingText = searchText
+      const opt1M = searchText.match(/option\s*1\s*[:\-\n]([\s\S]*?)(?=\n\s*option\s*[23]|$)/i)
+      if (opt1M) {
+        const revText = (iwm21?.reviewerComments ?? []).join(' ').toLowerCase()
+        const opt2M = searchText.match(/option\s*2\s*[:\-\n]([\s\S]*?)(?=\n\s*option\s*3|$)/i)
+        workingText = opt2M && /option\s*2/i.test(revText) ? opt2M[1] : opt1M[1]
+      }
+
+      if (!namedValues['Blue Factor score']) {
+        const m = workingText.match(/blue\s*factor[^:\n]*:\s*([\d.]+)/i) ??
+                  workingText.match(/([\d.]+)\s*(?:blue\s*factor|bf\b)/i)
+        if (m) {
+          namedValues['Blue Factor score'] = m[1]
+          console.log('[report] Blue Factor score from IWM 2.1:', m[1])
+        }
+      }
+      if (!namedValues['collection area']) {
+        const m = workingText.match(/collection\s+area[^:\n]*:\s*([\d,]+)/i) ??
+                  workingText.match(/catchment\s+area[^:\n]*:\s*([\d,]+)/i) ??
+                  workingText.match(/roof\s+area[^:\n]*:\s*([\d,]+)/i) ??
+                  workingText.match(/([\d,]+)\s*m[²2]\s*(?:roof|collect|catch)/i)
+        if (m) {
+          namedValues['collection area'] = m[1].replace(/,/g, '')
+          console.log('[report] Collection area from IWM 2.1:', m[1])
+        }
+      }
+      if (!namedValues['raingarden size'] && !namedValues['raingarden area']) {
+        const m = workingText.match(/rain\s*garden[^:\n]*:\s*([\d,]+)/i) ??
+                  workingText.match(/([\d,]+)\s*m[²2]\s*rain\s*garden/i)
+        if (m) {
+          const val = m[1].replace(/,/g, '')
+          namedValues['raingarden size'] = val
+          namedValues['raingarden area'] = val
+          console.log('[report] Raingarden size from IWM 2.1:', val)
+        }
+      }
+    }
+  }
+
   // Per-occurrence counters for generic tags
   const counters: Record<string, number> = {}
 
@@ -2089,7 +2169,7 @@ async function fillWordTemplate(
         // Check named values (case-insensitive) — covers all new named placeholders in MixUse/Comm templates
         const tagKey = tag.trim().toLowerCase()
         for (const [k, v] of Object.entries(namedValues)) {
-          if (k.trim().toLowerCase() === tagKey) return v
+          if (k.trim().toLowerCase() === tagKey) return formatNum(v)
         }
 
         counters[tag] = (counters[tag] ?? 0) + 1
@@ -2278,7 +2358,8 @@ async function fillWordTemplate(
   // ── Pre-application meeting dropdown ──────────────────────────────────────
   {
     const mgmt11 = credits.find(c => c.creditId.toLowerCase() === 'management 1.1')
-    const preAppItem = mgmt11?.creditStatus === 'Y'
+    const preAppAchieved = /^(y|yes|achieved|targeted)$/i.test(mgmt11?.creditStatus ?? '')
+    const preAppItem = preAppAchieved
       ? 'GIW has been involved in a pre-application meeting with Council on XXX. '
       : 'GIW has been actively involved in the preliminary design stage, but has not been involved in a pre-application meeting with Council. '
     renderedXml = setDropdownContent(renderedXml, 'GIW has been involved in a pre-application meeting with Council on XXX. ', preAppItem)
@@ -2300,14 +2381,6 @@ async function fillWordTemplate(
     renderedXml = setDropdownContent(renderedXml, '30 MJ/m2', badsItem)
   }
 
-  // ── Hot water system dropdown ─────────────────────────────────────────────
-  {
-    const hwRaw = getHotWaterRaw(credits)
-    const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
-    const hwItem = extractHwDescription(hwRaw) ?? extractHwDescription(allRaw) ?? 'a heat pump hot water system'
-    renderedXml = setDropdownContent(renderedXml, 'a centralised gas hot water system', hwItem)
-  }
-
   // ── Clothes drying dropdown (from OE dwelling profile "Clothes line") ─────
   {
     // Scan all OE 2.x rawDataPoints for clothes drying / clothes line mentions
@@ -2321,20 +2394,23 @@ async function fillWordTemplate(
       .join(' ')).toLowerCase()
 
     const noFacilities = /no (clothes|drying|laundry)|no (drying|clothes) facilit|clothes (line|drying).*none|none.*clothes/i.test(dryingRaw)
+    const isTH = /townhouse/i.test(project.typology ?? '')
 
     if (noFacilities) {
-      // Delete the Clothes Drying criteria row entirely
       renderedXml = deleteTableRows(renderedXml, ['Clothes Drying'])
     } else if (/communal|shared|rooftop|terrace/i.test(dryingRaw)) {
       renderedXml = setDropdownContent(renderedXml, 'clothes drying racks on the balcony',
         'Communal clothes drying facilities will be provided at rooftop terrace.')
     } else if (/indoor|internal|inside/i.test(dryingRaw)) {
       renderedXml = setDropdownContent(renderedXml, 'clothes drying racks on the balcony',
-        'All apartments will be provided with indoor clothes drying rack / lines.')
+        isTH
+          ? 'All townhouses will be provided with indoor clothes drying rack / lines.'
+          : 'All apartments will be provided with indoor clothes drying rack / lines.')
     } else {
-      // private / balcony / individual
       renderedXml = setDropdownContent(renderedXml, 'clothes drying racks on the balcony',
-        'All apartments will be provided with clothes drying racks on the balcony.')
+        isTH
+          ? 'All townhouses will be provided with clothes drying facilities in the private open space.'
+          : 'All apartments will be provided with clothes drying racks on the balcony.')
     }
   }
 
@@ -2363,23 +2439,18 @@ async function fillWordTemplate(
       /building\s*re-?use/i.test(c.creditName ?? ''))
     const brStatus = buildingReuse?.creditStatus ?? ''
     const isTargeted = /^(y|achieved|targeted|yes)$/i.test(brStatus)
-    const isScopedOut = /scoped.?out/i.test(brStatus)
 
-    if (isTargeted || isScopedOut) {
-      const selectedValue = isTargeted
-        ? 'At least 30% of the existing structure is re-used.'
-        : 'There is no existing building on the proposed site.'
+    if (isTargeted) {
       // Set and flatten both dropdown instances (loop until none remain)
       let attempts = 0
       while (renderedXml.includes(`displayText="${BUILDING_REUSE_OPT}"`) && attempts < 4) {
-        renderedXml = setDropdownContent(renderedXml, BUILDING_REUSE_OPT, selectedValue)
+        renderedXml = setDropdownContent(renderedXml, BUILDING_REUSE_OPT, 'At least 30% of the existing structure is re-used.')
         renderedXml = flattenDropdown(renderedXml, BUILDING_REUSE_OPT)
         attempts++
       }
     } else {
-      // Not targeted — delete all Building Reuse table rows
+      // Not targeted (including Scoped Out) — delete all Building Reuse table rows
       renderedXml = deleteTableRows(renderedXml, ['Building Re-use', 'Building Reuse'])
-      // Also remove merged-continuation rows that still contain the dropdown identifier
       renderedXml = deleteTableRowsContaining(renderedXml, BUILDING_REUSE_OPT)
     }
   }
