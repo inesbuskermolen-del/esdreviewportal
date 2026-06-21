@@ -22,6 +22,9 @@ export interface Project {
   client?: string | null
   architect?: string | null
   totalDwellings?: number | null
+  buildingLevels?: number | null
+  siteArea?: number | null
+  rainwaterTankSize?: number | null
   createdAt: string
   parentProjectId?: string | null
   reviewers?: ReviewerSummary[]

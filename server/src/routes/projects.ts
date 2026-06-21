@@ -585,7 +585,7 @@ router.get('/:id', requireGIW, async (req: Request, res: Response): Promise<void
 /* PATCH /api/projects/:id */
 router.patch('/:id', requireGIW, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, address, bessScore, date, revision, projectId, generationStatus, notifyEmail, gdft, typology, client, architect } =
+    const { name, address, bessScore, date, revision, projectId, generationStatus, notifyEmail, gdft, typology, client, architect, siteArea, totalDwellings, buildingLevels, rainwaterTankSize } =
       req.body as Partial<{
         name: string
         address: string
@@ -599,6 +599,10 @@ router.patch('/:id', requireGIW, async (req: Request, res: Response): Promise<vo
         typology: string | null
         client: string | null
         architect: string | null
+        siteArea: number | null
+        totalDwellings: number | null
+        buildingLevels: number | null
+        rainwaterTankSize: number | null
       }>
 
     const project = await prisma.project.update({
@@ -616,6 +620,10 @@ router.patch('/:id', requireGIW, async (req: Request, res: Response): Promise<vo
         ...(typology !== undefined && { typology: typology || null }),
         ...(client !== undefined && { client: client || null }),
         ...(architect !== undefined && { architect: architect || null }),
+        ...(siteArea !== undefined && { siteArea: siteArea != null ? parseInt(String(siteArea)) : null }),
+        ...(totalDwellings !== undefined && { totalDwellings: totalDwellings != null ? parseInt(String(totalDwellings)) : null }),
+        ...(buildingLevels !== undefined && { buildingLevels: buildingLevels != null ? parseInt(String(buildingLevels)) : null }),
+        ...(rainwaterTankSize !== undefined && { rainwaterTankSize: rainwaterTankSize != null ? parseInt(String(rainwaterTankSize)) : null }),
       },
     })
 
@@ -781,11 +789,11 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
       reviewerComments: c.comments.map(cm => cm.commentText),
     }))
 
-    const { client, architect, giwref } = req.body as { client?: string; architect?: string; giwref?: string }
+    const { client, architect, giwref, siteArea: siteAreaOverride } = req.body as { client?: string; architect?: string; giwref?: string; siteArea?: number }
     const { wordBuffer, excelBuffer, wordFilename, excelFilename } = await generateSMPReport(
       project,
       credits,
-      { client, architect, giwref },
+      { client, architect, giwref, siteArea: siteAreaOverride != null ? Number(siteAreaOverride) : undefined },
     )
 
     const safeName = project.name.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')

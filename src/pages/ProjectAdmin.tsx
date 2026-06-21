@@ -230,6 +230,7 @@ export default function ProjectAdmin() {
   const [reportGiwref, setReportGiwref] = useState('')
   const [reportClient, setReportClient] = useState('')
   const [reportArchitect, setReportArchitect] = useState('')
+  const [reportSiteArea, setReportSiteArea] = useState('')
 
   async function handleChangelog() {
     if (!id) return
@@ -259,6 +260,7 @@ export default function ProjectAdmin() {
     setReportGiwref('GIW')
     setReportClient(project?.client ?? '')
     setReportArchitect(project?.architect ?? '')
+    setReportSiteArea(project?.siteArea != null ? String(project.siteArea) : '')
     setReportModalOpen(true)
   }
 
@@ -269,7 +271,12 @@ export default function ProjectAdmin() {
     try {
       const res = await axios.post(
         `/api/projects/${id}/report`,
-        { giwref: reportGiwref.trim(), client: reportClient.trim(), architect: reportArchitect.trim() },
+        {
+          giwref: reportGiwref.trim(),
+          client: reportClient.trim(),
+          architect: reportArchitect.trim(),
+          ...(reportSiteArea.trim() !== '' && { siteArea: parseInt(reportSiteArea.trim().replace(/,/g, '')) }),
+        },
         { withCredentials: true, responseType: 'blob' },
       )
       const blob = new Blob([res.data as BlobPart], { type: 'application/zip' })
@@ -905,6 +912,19 @@ export default function ProjectAdmin() {
                   value={reportArchitect}
                   onChange={(e) => setReportArchitect(e.target.value)}
                   placeholder="Architect name"
+                  className="giw-input w-full"
+                  style={{ fontFamily: 'Open Sans, sans-serif' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#8C8C8C', display: 'block', marginBottom: '4px' }}>
+                  Site Area (m²)
+                </label>
+                <input
+                  type="text"
+                  value={reportSiteArea}
+                  onChange={(e) => setReportSiteArea(e.target.value)}
+                  placeholder="e.g. 3356"
                   className="giw-input w-full"
                   style={{ fontFamily: 'Open Sans, sans-serif' }}
                   onKeyDown={(e) => { if (e.key === 'Enter') submitReport() }}

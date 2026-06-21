@@ -2708,7 +2708,7 @@ function inferTypology(credits: ReportCreditData[]): string | null {
 export async function generateSMPReport(
   project: ReportProjectData,
   credits: ReportCreditData[],
-  overrides?: { client?: string; architect?: string; giwref?: string; totalDwellings?: number },
+  overrides?: { client?: string; architect?: string; giwref?: string; totalDwellings?: number; siteArea?: number },
 ): Promise<{
   wordBuffer: Buffer
   excelBuffer: Buffer
@@ -2758,8 +2758,9 @@ export async function generateSMPReport(
 
   // Override wins; then fall back to what was stored on the project record
   const resolvedTotalDwellings = overrides?.totalDwellings ?? project.totalDwellings ?? null
+  const resolvedSiteArea = overrides?.siteArea ?? project.siteArea ?? null
 
-  const projectWithFormattedAddress = { ...project, address: formattedAddress, totalDwellings: resolvedTotalDwellings }
+  const projectWithFormattedAddress = { ...project, address: formattedAddress, totalDwellings: resolvedTotalDwellings, siteArea: resolvedSiteArea }
 
   const excelBuffer = typology === 'Non-Residential'
     ? fillExcelNonResidential(excelTemplatePath, projectWithFormattedAddress, credits)
