@@ -1101,6 +1101,17 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
     }
   }
 
+  // ── OE 2.6: delete gas metering sentence for commercial tenancy when targeted ─
+  {
+    const oe26 = findCreditLike(credits, 'oe 2.6')
+    if (/^(y|yes|achieved|targeted)$/i.test(oe26?.creditStatus ?? '')) {
+      xml = deleteParagraphsByText(xml, [
+        /gas metering is to be provided to the commercial tenancy/i,
+        /gas metering is to be provided to each individual tenancy requiring a gas connection/i,
+      ])
+    }
+  }
+
   // ── Hot water: "to utilise [XX]" ─────────────────────────────────────────
   // Fills [XX] in "The development is to utilise [XX]" paragraphs.
   // Also corrects cases where Claude filled the slot with a bare number instead of a description.
@@ -2399,14 +2410,11 @@ async function fillWordTemplate(
   // ── Landscape irrigation dropdown ─────────────────────────────────────────
   {
     const iwm31 = findCreditLike(credits, 'iwm 3.1')
-    const iwm31Raw = (iwm31?.rawDataPoints ?? '').toLowerCase()
-    let irrigationItem: string
-    if (/rainwater tank|tank.*connect|connect.*tank/i.test(iwm31Raw)) {
-      irrigationItem = 'Landscape irrigation demand will be connected to the rainwater tank. '
-    } else {
-      // Native vegetation is the default (no supplementary irrigation)
-      irrigationItem = 'The majority of landscaping is to be native vegetation with no irrigation demand after the initial establishment period.'
-    }
+    const iwm31Status = iwm31?.creditStatus ?? ''
+    const isScopedOut = /scoped.?out/i.test(iwm31Status)
+    const irrigationItem = isScopedOut
+      ? 'Landscape irrigation demand will be connected to the rainwater tank. '
+      : 'The majority of landscaping is to be native vegetation with no irrigation demand after the initial establishment period.'
     renderedXml = setDropdownContent(renderedXml, 'native vegetation with no irrigation demand', irrigationItem)
   }
 
