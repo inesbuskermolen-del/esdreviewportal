@@ -28,7 +28,7 @@ model Project {
   siteArea            Int?
   rainwaterTankSize   Int?
   parentProjectId  String?
-  parent           Project?  @relation("ProjectRevisions", fields: [parentProjectId], references: [id])
+  parent           Project?  @relation("ProjectRevisions", fields: [parentProjectId], references: [id], onDelete: Cascade)
   revisions        Project[] @relation("ProjectRevisions")
   credits          Credit[]
   reviewers        Reviewer[]
@@ -39,7 +39,7 @@ model Project {
 model Credit {
   id                 String   @id @default(cuid())
   projectId          String
-  project            Project  @relation(fields: [projectId], references: [id])
+  project            Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   category           String
   categoryOrder      Int
   creditId           String
@@ -64,7 +64,7 @@ model Credit {
 model CreditComment {
   id                 String   @id @default(cuid())
   creditId           String
-  credit             Credit   @relation(fields: [creditId], references: [id])
+  credit             Credit   @relation(fields: [creditId], references: [id], onDelete: Cascade)
   projectId          String
   reviewerEmail      String
   reviewerDiscipline String
@@ -75,7 +75,7 @@ model CreditComment {
 model Reviewer {
   id           String    @id @default(cuid())
   projectId    String
-  project      Project   @relation(fields: [projectId], references: [id])
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   email        String
   name         String?
   discipline   String
@@ -87,7 +87,7 @@ model Reviewer {
 model DrawingRequirement {
   id              String  @id @default(cuid())
   projectId       String
-  project         Project @relation(fields: [projectId], references: [id])
+  project         Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creditReference String
   drawingType     String
   requirement     String
@@ -99,9 +99,9 @@ model DrawingRequirement {
 model ESDExcellenceOpportunity {
   id                     String    @id @default(cuid())
   projectId              String
-  project                Project   @relation(fields: [projectId], references: [id])
+  project                Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creditId               String?
-  credit                 Credit?   @relation(fields: [creditId], references: [id])
+  credit                 Credit?   @relation(fields: [creditId], references: [id], onDelete: SetNull)
   creditReference        String
   creditName             String
   currentScore           Float?
@@ -118,7 +118,7 @@ model ESDExcellenceOpportunity {
 model ESDExcellenceNote {
   id            String                   @id @default(cuid())
   excellenceId  String
-  excellence    ESDExcellenceOpportunity @relation(fields: [excellenceId], references: [id])
+  excellence    ESDExcellenceOpportunity @relation(fields: [excellenceId], references: [id], onDelete: Cascade)
   reviewerEmail String
   notes         String                   @default("")
   updatedAt     DateTime                 @updatedAt
