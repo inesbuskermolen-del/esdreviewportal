@@ -2147,6 +2147,67 @@ async function fillWordTemplate(
     }
   }
 
+  // ── Winter sunlight from IEQ 1.3 ─────────────────────────────────────────
+  if (!namedValues['winter sunlight% (XX out of XX)']) {
+    const ieq13 = findCreditLike(credits, 'ieq 1.3')
+    if (ieq13?.rawDataPoints) {
+      const totalApts = project.totalDwellings ?? getTotalApartments(credits)
+      const fmt = formatBESSPercentage(ieq13.rawDataPoints, totalApts)
+      if (fmt) {
+        namedValues['winter sunlight% (XX out of XX)'] = fmt
+        console.log('[report] Winter sunlight from IEQ 1.3:', fmt)
+      }
+    }
+  }
+
+  // ── Ceiling fans % from IEQ rawDataPoints ────────────────────────────────
+  if (!namedValues['fans'] && !namedValues['Fans']) {
+    const ieqRaw = credits.filter(c => /^ieq/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+    const fansNum = extractNumber(ieqRaw, [
+      /(\d+(?:\.\d+)?)\s*%[^.\n]*ceiling\s*fan/i,
+      /ceiling\s*fan[^.\n]*?:\s*(\d+(?:\.\d+)?)\s*%/i,
+      /(\d+(?:\.\d+)?)\s*%[^.\n]*regular[- ]?use\s*areas?/i,
+    ])
+    if (fansNum !== null) {
+      namedValues['fans'] = String(fansNum)
+      namedValues['Fans'] = String(fansNum)
+      console.log('[report] Fans % from IEQ:', fansNum)
+    }
+  }
+
+  // ── Commercial visitor bikes and motorbikes from Transport rawDataPoints ──
+  const transportRawNamed = credits.filter(c => /^transport/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+  if (transportRawNamed.trim()) {
+    if (!namedValues['commercial visitor bikes'] && !namedValues['visitor bikes']) {
+      const nrVisitorBike = extractNumber(transportRawNamed, [
+        /(\d+)\s*non[- ]?residential\s+visitor\s+bicycle/i,
+        /non[- ]?residential\s+visitor\s+bicycle[^.\n]*?:\s*(\d+)/i,
+        /non[- ]?residential\s+visitors?[^.\n]*?:\s*(\d+)/i,
+        /visitor[^.\n]*?non[- ]?residential[^.\n]*?:\s*(\d+)/i,
+        /non[- ]?res(?:idential)?\s+visitor[^.\n]*?:\s*(\d+)/i,
+        /(\d+)\s*(?:non[- ]?res|nr)\s+(?:visitor\s+)?bicycle/i,
+      ])
+      if (nrVisitorBike !== null) {
+        namedValues['commercial visitor bikes'] = String(nrVisitorBike)
+        namedValues['visitor bikes'] = String(nrVisitorBike)
+        console.log('[report] Commercial visitor bikes from Transport:', nrVisitorBike)
+      }
+    }
+    if (!namedValues['motorbikes'] && !namedValues['Motorbikes']) {
+      const motoNum = extractNumber(transportRawNamed, [
+        /(\d+)\s*motorbike/i,
+        /(\d+)\s*moped/i,
+        /motorbike[^.\n]*?:\s*(\d+)/i,
+        /moped[^.\n]*?:\s*(\d+)/i,
+      ])
+      if (motoNum !== null) {
+        namedValues['motorbikes'] = String(motoNum)
+        namedValues['Motorbikes'] = String(motoNum)
+        console.log('[report] Motorbikes from Transport:', motoNum)
+      }
+    }
+  }
+
   // Per-occurrence counters for generic tags
   const counters: Record<string, number> = {}
 
@@ -2580,8 +2641,8 @@ async function fillWordTemplate(
 
   // ── Ceiling fans: delete line when 0% or unfilled ─────────────────────────
   renderedXml = deleteParagraphsByText(renderedXml, [
-    /(?:\b0%\b|\[XX\]%|\[XX%\]).*ceiling fan/i,
-    /ceiling fan.*(?:\b0%\b|\[XX\]%|\[XX%\])/i,
+    /(?:\b0%\b|\[XX\]%|\[XX%\]|\[fans\]%|\[Fans\]%).*ceiling fan/i,
+    /ceiling fan.*(?:\b0%\b|\[XX\]%|\[XX%\]|\[fans\]%|\[Fans\]%)/i,
   ])
 
   // ── Retail / commercial line items ────────────────────────────────────────

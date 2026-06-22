@@ -760,6 +760,7 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
         typology: true,
         client: true,
         architect: true,
+        bessScore: true,
         totalDwellings: true,
         buildingLevels: true,
         siteArea: true,
