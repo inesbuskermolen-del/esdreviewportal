@@ -2514,10 +2514,11 @@ async function fillWordTemplate(
   {
     const daylightRaw = credits
       .filter(c => /ieq 1\.[12]/i.test(c.creditId))
-      .map(c => (c.rawDataPoints ?? '').toLowerCase())
-      .join(' ')
-    const usedDTS     = /use the bess deemed to satisfy|deemed.to.satisfy.*method.*:\s*yes/i.test(daylightRaw)
-    const usedBuiltIn = /use the built-in calculation tools/i.test(daylightRaw)
+      .map(c => c.rawDataPoints ?? '')
+      .join('\n')
+    // Parse table rows: "Question?:    Answer" — check the answer side, not just presence of keywords
+    const usedDTS     = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(daylightRaw)
+    const usedBuiltIn = /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(daylightRaw)
 
     // Delete DTS body paragraphs when modelling or built-in calculator was used
     if (!usedDTS) {
