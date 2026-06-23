@@ -761,12 +761,24 @@ function detectNonResidential(credits: ReportCreditData[], typology: string | nu
  *  - The composite sentence "will include [XX] apartments, [XX] retail tenancies and [XX] commercial tenancies …"
  */
 function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercial: boolean): string {
-  // ── Delete area paragraphs ──────────────────────────────────────────────
+  // ── Delete retail / office paragraphs and unfilled tags ─────────────────
   if (!hasRetail) {
-    xml = deleteParagraphsByText(xml, [/^(?:\[XX\]|\d[\d,.]*)m2\s+retail$/i])
+    xml = deleteParagraphsByText(xml, [
+      /^(?:\[XX\]|\d[\d,.]*)m2\s+retail$/i,
+      /\[total retail\]/i,
+      /\[Total Retail\]/i,
+      /\[total area retail\]/i,
+      /\[Total area retail\]/i,
+    ])
   }
   if (!hasCommercial) {
-    xml = deleteParagraphsByText(xml, [/^(?:\[XX\]|\d[\d,.]*)m2\s+(?:commercial|office)$/i])
+    xml = deleteParagraphsByText(xml, [
+      /^(?:\[XX\]|\d[\d,.]*)m2\s+(?:commercial|office)$/i,
+      /\[total office\]/i,
+      /\[Total Office\]/i,
+      /\[total area office\]/i,
+      /\[Total area office\]/i,
+    ])
   }
 
   if (hasRetail && hasCommercial) return xml
