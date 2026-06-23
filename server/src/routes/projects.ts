@@ -765,6 +765,7 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
         buildingLevels: true,
         siteArea: true,
         rainwaterTankSize: true,
+        gdft: true,
       },
     })
     if (!project) {

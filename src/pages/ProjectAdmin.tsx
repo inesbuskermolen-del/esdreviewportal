@@ -998,7 +998,7 @@ function shortCreditId(id: string): string {
     .replace(/^Management\s+/i, 'M ')
     .replace(/^Transport\s+/i, 'Tr ')
     .replace(/^Urban Ecology\s+/i, 'UE ')
-    .replace(/^Innovation\s+/i, 'Inn ')
+    .replace(/^Innovation(\s.*)?$/i, 'Inn')
 }
 
 function getCategoryOrder(creditId: string, category = ''): number {
