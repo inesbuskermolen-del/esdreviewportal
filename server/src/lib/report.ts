@@ -781,6 +781,13 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
     ])
   }
 
+  // ── Delete non-residential-only criteria when project has no non-resi space ─
+  if (!hasRetail && !hasCommercial) {
+    xml = deleteParagraphsByText(xml, [
+      /internal\s+lighting[^a-z]*non[- ]?resid/i,
+    ])
+  }
+
   if (hasRetail && hasCommercial) return xml
 
   // ── Modify the "will include … apartments, … retail tenancies and … commercial tenancies …" sentence ──
