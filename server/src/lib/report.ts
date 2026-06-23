@@ -148,7 +148,39 @@ function extractDocParagraphs(xml: string): string[] {
 
 // ─── Claude placeholder filling ───────────────────────────────────────────────
 
+/**
+ * Scan the document XML for every [XX] occurrence in document order and return
+ * the surrounding paragraph text as context for each one. The returned array has
+ * one entry per [XX] occurrence, with up to ~80 chars of surrounding text so
+ * Claude can understand what value belongs there without relying on fixed positions.
+ */
+function extractXXOccurrences(xml: string): string[] {
+  const positions: string[] = []
+  const paraRe = /<w:p\b[\s\S]*?<\/w:p>/g
+  let match: RegExpExecArray | null
+  while ((match = paraRe.exec(xml)) !== null) {
+    const texts: string[] = []
+    const textRe = /<w:t[^>]*>([^<]*)<\/w:t>/g
+    let m: RegExpExecArray | null
+    while ((m = textRe.exec(match[0])) !== null) texts.push(m[1])
+    const combined = texts.join('')
+    let start = 0
+    while (true) {
+      const idx = combined.indexOf('[XX]', start)
+      if (idx === -1) break
+      const before = combined.substring(Math.max(0, idx - 80), idx)
+      const after = combined.substring(idx + 4, Math.min(combined.length, idx + 80))
+      positions.push((before + '[XX]' + after).trim().replace(/\s+/g, ' '))
+      start = idx + 4
+    }
+  }
+  return positions
+}
+
+type PlaceholderValues = Record<string, string[]>
+
 interface FillData {
+  placeholders: PlaceholderValues
   rowsToDelete: string[]
   council: string | null
   namedValues: Record<string, string>
@@ -353,6 +385,7 @@ async function getWordFillData(
   credits: ReportCreditData[],
   docParagraphs: string[],
   criteriaNames: string[],
+  xxOccurrences: string[],
 ): Promise<FillData> {
   // Credits with data points — used for placeholder filling
   const creditSummary = credits
@@ -381,9 +414,14 @@ async function getWordFillData(
     return '\nGIW COMMENTS (source of truth for these descriptions):\n' + lines.join('\n\n')
   })()
 
-  const prompt = `You are filling a Sustainability Management Plan (SMP) Word document template for a building project.
+  // Dynamic [XX] position list extracted from this specific template
+  const xxPositionList = xxOccurrences
+    .map((ctx, i) => `${i + 1}. ${ctx}`)
+    .join('\n')
 
-Your task is to provide named values for the template placeholders and decide which rows to delete.
+  const prompt = `You are filling placeholder tags in a Sustainability Management Plan (SMP) Word document template for a building project.
+
+The template uses square-bracket placeholders like [XX], [XXX], [XX%], [7.0], etc. Your task is to fill each one with the correct value extracted from the BESS assessment data provided.
 
 PROJECT DATA:
 - Project name: ${project.name}
@@ -410,11 +448,18 @@ City of Boroondara, City of Yarra, City of Banyule, City of Bass Coast Shire, Ci
 
 Return ONLY a valid JSON object with the following exact structure.
 
+For the placeholder arrays: each array must contain the replacement values in DOCUMENT ORDER (i.e., the Nth element replaces the Nth occurrence of that tag). If a value cannot be determined, use the original placeholder text (e.g. "[XX]").
+
 For "rowsToDelete": list the EXACT criteria names (from the list above) whose corresponding BESS credit is NOT claimed. A credit is not claimed if its status is "Scoped Out", "Not Achieved", "N/A", or if no matching credit exists in BESS at all. Do NOT include header rows (e.g. "Criteria", "Council Best Practice Standard", "Development Provision") or rows that don't correspond to a specific BESS credit. Use the exact criteria string from the list. IMPORTANT: Never include any Materials criteria (e.g. Embodied Energy, Structural and Reinforcing Steel, Sustainable Timber, PVC, Sustainable Products, Building Re-use) — these rows must always remain in the table.
 
 For "council": return the EXACT council name from the list above that matches the project's suburb/address. Use your knowledge of Melbourne LGA boundaries. Return null if you cannot determine it.
 
 {
+  "XX": [<${xxOccurrences.length} values — one per [XX] occurrence listed below>],
+  "XXX": [<all the same rainwater tank volume in litres, e.g. "2000" — one per [XXX] occurrence>],
+  "XX%": [<all the same non-residential energy improvement %, e.g. "15%" — one per [XX%] occurrence>],
+  "7.0": [<all the same NatHERS star rating, e.g. "7.5" — one per [7.0] occurrence>],
+  "XX% (XX out of XX)": [<values in document order — one per [XX% (XX out of XX)] occurrence>],
   "council": "City of Yarra",
   "rowsToDelete": ["exact criteria name 1", "exact criteria name 2", ...],
   "namedValues": {
@@ -475,11 +520,60 @@ For "council": return the EXACT council name from the list above that matches th
     "raingarden area": "<same as raingarden size>",
     "tap WELS": "<same as taps WELS — tap WELS star rating from IWM 1.1 or null>",
     "total townhouses": "<total number of townhouses from OE 2.x rawDataPoints or null>",
-    "orientation% (XX out of XX)": "<percentage of townhouses with good solar orientation formatted as 'N% (X out of Y)' from IEQ 1.3 rawDataPoints, or null>",
-    "Landscape Irrigation": "<from IWM 3.1 rawDataPoints; if scoped out: 'Not targeted.'; if no data: 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'>",
-    "CO2 ppm": "<CO2 concentration limit in ppm from IEQ 2.3 rawDataPoints e.g. '900', or null>"
+    "orientation% (XX out of XX)": "<percentage of townhouses with good solar orientation formatted as 'N% (X out of Y)' from IEQ 1.3 rawDataPoints, or null>"
   }
 }
+
+[XX] OCCURRENCES IN THIS TEMPLATE — ${xxOccurrences.length} total, in document order.
+Fill position N with the value that belongs in that paragraph context:
+${xxPositionList}
+
+RULES FOR DETERMINING [XX] VALUES (match by paragraph context above):
+- bedroom breakdown lines ("[XX] x 1-bedroom apartments", "[XX] x 2-bedroom", "[XX] x studio", etc.) → return "[XX]" (leave these unfilled — they will remain as placeholders in the document)
+- "apartments" / "dwellings" / "will include … apartments" → total residential dwellings from OE 2.x rawDataPoints; SUM ALL bedroom types (Studio + 1BR + 2BR + 3BR etc.) — do NOT return one bedroom type alone. E.g. '20 x 1BR, 30 x 2BR, 10 x 3BR' → "60". Return just the number.
+- "retail tenancies" count → from OE 2.x rawDataPoints "Retail: N tenancies"; return just the number or null if no retail
+- "commercial" / "office" tenancies count → from OE 2.x rawDataPoints "Office: N" or "Commercial: N"; return just the number or null
+- "levels" / "storeys" / "floors" count → search ALL rawDataPoints AND project name for storey/level count; return just the number
+- retail area m2 (e.g. "Xm2 retail") → from OE 2.x rawDataPoints "Retail: N tenancies, Xm² total"; return just the number or null
+- commercial area m2 → from OE 2.x "Office/Commercial: N, Xm² total"; return just the number or null
+- "surface area" / site area m2 → use PROJECT DATA siteArea if provided; otherwise search rawDataPoints; return just the number
+- distance to Melbourne CBD km → from your geographic knowledge of the suburb/address; return just the number
+- "Landscape Irrigation" description → from IWM 3.1 rawDataPoints; if scoped out: 'Not targeted.'; if no data: 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'
+- "kW Solar PV" / "solar PV system" size → from OE 4.2 or OE 4.5 rawDataPoints; return just the kW number
+- "DF" / daylight factor % of nominated area → from IEQ rawDataPoints; return just the number
+- "communal space" area m2 → from OE rawDataPoints; return just the number
+- vegetation % of site area → from Urban Ecology rawDataPoints; return just the number
+- "food production" area m2 → from Urban Ecology rawDataPoints; return just the number
+- "litre rainwater tank" / "directed into the … litre rainwater tank" → use PROJECT DATA rainwaterTankSize; return just the number
+- "to utilise [XX]" hot water system → from OE 3.x rawDataPoints "Type of Hot Water System: X" field; return ONLY a full descriptive phrase e.g. 'a heat pump hot water system', 'a centralised gas hot water system', 'individual electric instantaneous hot water systems' — NEVER a number or count
+- solar generation kWh ("generate approximately [XX]kWh") → from OE 4.x rawDataPoints; return just the number
+- "[XX]% of Living areas" daylight → from IEQ 1.x rawDataPoints; return just the % number
+- "[XX]% of Bedrooms" daylight → from IEQ 1.x rawDataPoints; return just the % number
+- non-residential ventilation description ("Ventilation – Non-Residential") → from IEQ 2.3 rawDataPoints; describe approach in one sentence
+- ceiling fans % ("regular use areas") → from IEQ rawDataPoints; return just the number
+- thermal comfort shading bullet points ("• [XX]" occurring after "shading to the following areas" paragraph) → from the IEQ 3.2 or IEQ 3.4 GIW Comment in the GIW COMMENTS section above; parse the bullet-point lines (lines starting with "•" or "-") and assign one location description per [XX] slot (strip the bullet prefix); if fewer bullets than [XX] slots, repeat the last bullet; if no GIW comment exists, return "[XX]"
+- Stormwater Treatment / Blue Factor description ([XX] values in Blue Factor / stormwater / rainwater-tank context for IWM 2.1) → from the IWM 2.1 GIW Comment in the GIW COMMENTS section above; if the comment contains multiple options (Option 1, Option 2, etc.), use REVIEWER COMMENTS to select the correct option, then fill each [XX] from the values in that option's text; if only one option or no reviewer comment, use Option 1 / the full comment text; extract specific values (roof areas, tank size, toilet count, raingarden size) to fill each [XX]
+- resident bicycle spaces → from Transport rawDataPoints; return just the number
+- residential visitor bicycle spaces → from Transport rawDataPoints; return just the number
+- employee bicycle spaces → from Transport rawDataPoints; return just the number
+- non-residential visitor bicycle spaces → from Transport rawDataPoints; return just the number
+- end-of-trip showers → from Transport rawDataPoints; return just the number
+- end-of-trip lockers → from Transport rawDataPoints; return just the number
+- motorbike / moped spaces → from Transport rawDataPoints; return just the number
+- communal space / vegetation % / food production (second occurrence in SMP details) → same value as the first occurrence of the same context
+
+RULES FOR [XX% (XX out of XX)] (format: "87% (52 out of 60)"):
+- Winter sunlight → IEQ 1.3 rawDataPoints; if only % given calculate count from total apartments
+- Cross-ventilation → IEQ 2.3 rawDataPoints; same calculation method
+
+RULES FOR [XXX] (all occurrences same value):
+- Rainwater tank volume litres → use PROJECT DATA rainwaterTankSize for ALL occurrences
+
+RULES FOR [XX%] (all occurrences same value):
+- Non-residential energy improvement above NCC/Section J → from OE 1.1 rawDataPoints; return with % sign e.g. "15%"; return "0%" if zero or not found
+
+RULES FOR [7.0] (all occurrences same value):
+- NatHERS star rating → from OE 1.2 rawDataPoints; return just the number e.g. "7.5"
 
 Return ONLY the JSON, no explanation.`
 
@@ -499,6 +593,12 @@ Return ONLY the JSON, no explanation.`
     const parsed = JSON.parse(jsonText)
     const rowsToDelete: string[] = Array.isArray(parsed.rowsToDelete) ? parsed.rowsToDelete : []
     const council: string | null = typeof parsed.council === 'string' ? parsed.council : null
+    const xxVals: string[] = Array.isArray(parsed['XX']) ? parsed['XX'] : []
+    const xxPctVals: string[] = Array.isArray(parsed['XX% (XX out of XX)']) ? parsed['XX% (XX out of XX)'] : []
+    console.log(`[report] Claude filled ${xxVals.length} [XX] positions (template has ${xxOccurrences.length})`)
+    console.log('[report] Claude XX values:', JSON.stringify(xxVals))
+    console.log('[report] Claude XX% (XX out of XX) values:', xxPctVals)
+    // Extract named values — filter out null/empty strings from Claude's response
     const rawNamed = (typeof parsed.namedValues === 'object' && parsed.namedValues !== null)
       ? parsed.namedValues as Record<string, unknown>
       : {}
@@ -508,10 +608,13 @@ Return ONLY the JSON, no explanation.`
         namedValues[k] = String(v)
       }
     }
-    return { rowsToDelete, council, namedValues }
+    delete parsed.rowsToDelete
+    delete parsed.council
+    delete parsed.namedValues
+    return { placeholders: parsed as PlaceholderValues, rowsToDelete, council, namedValues }
   } catch {
     console.error('[report] Claude fill-data response was not valid JSON:', jsonText.slice(0, 500))
-    return { rowsToDelete: [], council: null, namedValues: {} }
+    return { placeholders: {}, rowsToDelete: [], council: null, namedValues: {} }
   }
 }
 
@@ -667,25 +770,9 @@ function getTotalApartments(credits: ReportCreditData[]): number | null {
 }
 
 /**
- * Replace all text content in the second cell of a table row with `value`.
- * Preserves cell/paragraph/run formatting from the first paragraph in that cell.
- */
-function replaceSecondCellContent(rowXml: string, value: string): string {
-  const cells = [...rowXml.matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g)]
-  if (cells.length < 2) return rowXml
-  const secondCell = cells[1][0]
-  const tcPr   = (secondCell.match(/<w:tcPr\b[\s\S]*?<\/w:tcPr>/) ?? [])[0] ?? ''
-  const firstP = (secondCell.match(/<w:p\b[\s\S]*?<\/w:p>/) ?? [])[0] ?? null
-  const pPr    = firstP ? ((firstP.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/) ?? [])[0] ?? '') : ''
-  const rPr    = firstP ? ((firstP.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/) ?? [])[0] ?? '') : ''
-  const newCell = `<w:tc>${tcPr}<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r></w:p></w:tc>`
-  const m = cells[1]
-  return rowXml.slice(0, m.index!) + newCell + rowXml.slice(m.index! + m[0].length)
-}
-
-/**
- * Find the first table row whose first-cell text matches headerPattern and
- * replace the second cell's content with value.
+ * Replace [XX] inside the second table cell of the first row whose first-cell text
+ * matches headerPattern. Used for page-4 project-data tables where the label and
+ * value are in adjacent cells rather than inline prose.
  */
 function fillTableCellByHeader(xml: string, headerPattern: RegExp, value: string): string {
   let i = 0
@@ -695,8 +782,8 @@ function fillTableCellByHeader(xml: string, headerPattern: RegExp, value: string
     const trEnd = findRowEnd(xml, trStart)
     const rowXml = xml.slice(trStart, trEnd)
     const firstCell = getFirstCellText(rowXml)
-    if (headerPattern.test(firstCell)) {
-      const fixed = replaceSecondCellContent(rowXml, value)
+    if (headerPattern.test(firstCell) && rowXml.includes('[XX]')) {
+      const fixed = rowXml.replace('[XX]', () => value)
       return xml.slice(0, trStart) + fixed + xml.slice(trEnd)
     }
     i = trEnd
@@ -770,16 +857,16 @@ function detectNonResidential(credits: ReportCreditData[], typology: string | nu
 /**
  * Remove retail/commercial line items from page 4 when not present in the project.
  * Handles:
- *  - "NNm2 retail" / "NNm2 commercial" standalone paragraphs
- *  - The composite sentence "will include N apartments, N retail tenancies and N commercial tenancies …"
+ *  - "[XX]m2 retail" / "[XX]m2 commercial" standalone paragraphs
+ *  - The composite sentence "will include [XX] apartments, [XX] retail tenancies and [XX] commercial tenancies …"
  */
 function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercial: boolean): string {
   // ── Delete area paragraphs ──────────────────────────────────────────────
   if (!hasRetail) {
-    xml = deleteParagraphsByText(xml, [/^\d[\d,.]*m2\s+retail$/i])
+    xml = deleteParagraphsByText(xml, [/^(?:\[XX\]|\d[\d,.]*)m2\s+retail$/i])
   }
   if (!hasCommercial) {
-    xml = deleteParagraphsByText(xml, [/^\d[\d,.]*m2\s+(?:commercial|office)$/i])
+    xml = deleteParagraphsByText(xml, [/^(?:\[XX\]|\d[\d,.]*)m2\s+(?:commercial|office)$/i])
   }
 
   if (hasRetail && hasCommercial) return xml
@@ -799,15 +886,15 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
 
     if (!hasRetail && !hasCommercial) {
       // Remove ", M retail tenancies and P commercial tenancies" — keep " constructed over"
-      const hit = combined.match(/,\s*\d+\s*retail tenancies and\s*\d+\s*commercial tenancies/)
+      const hit = combined.match(/,\s*(?:\[XX\]|\d+)\s*retail tenancies and\s*(?:\[XX\]|\d+)\s*commercial tenancies/)
       if (hit?.index !== undefined) changes.push({ pos: hit.index, len: hit[0].length, replacement: '' })
     } else if (!hasRetail) {
       // Remove ", M retail tenancies and " — replace with " and " to keep commercial
-      const hit = combined.match(/,\s*\d+\s*retail tenancies and\s*/)
+      const hit = combined.match(/,\s*(?:\[XX\]|\d+)\s*retail tenancies and\s*/)
       if (hit?.index !== undefined) changes.push({ pos: hit.index, len: hit[0].length, replacement: ' and ' })
     } else {
       // !hasCommercial — remove " and P commercial tenancies"
-      const hit = combined.match(/\s+and\s+\d+\s+commercial tenancies/)
+      const hit = combined.match(/\s+and\s+(?:\[XX\]|\d+)\s+commercial tenancies/)
       if (hit?.index !== undefined) changes.push({ pos: hit.index, len: hit[0].length, replacement: '' })
     }
 
@@ -817,10 +904,189 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
 }
 
 /**
- * Post-render fixes: correct wrong values Claude filled and handle conditional
- * paragraph logic that cannot be done pre-render via named tags.
+ * Post-render fallback: replace unfilled placeholders using rawDataPoints directly.
+ * Handles cases where Claude's positional counter misfires for these specific values.
  */
 function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: ReportProjectData): string {
+  // Prefer the stored totalDwellings field; fall back to regex extraction from rawDataPoints
+  const totalApts = project.totalDwellings ?? getTotalApartments(credits)
+  console.log('[report] applyBESSFallbacks: totalApts=', totalApts, 'project.name=', project.name)
+
+  // ── Rainwater tank size ───────────────────────────────────────────────────
+  if (project.rainwaterTankSize != null) {
+    const tankStr = formatNum(String(project.rainwaterTankSize))
+    // Fill all [XXX] occurrences (Key ESD Initiatives table, SMP details, appendix)
+    xml = xml.replace(/\[XXX\]/g, tankStr)
+    // Correct the [XX] "directed into the X litre rainwater tank" sentence —
+    // Claude often reads a different value from rawDataPoints instead of PROJECT DATA.
+    xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+      const texts: string[] = []
+      const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(para)) !== null) texts.push(m[1])
+      const combined = texts.join('')
+      if (!/directed into/i.test(combined)) return para
+      if (!/litre\s+rainwater|rainwater.*litre/i.test(combined)) return para
+      const hit = combined.match(/(?:\[XX\]|[\d,]+)\s*litre/)
+      if (!hit || hit.index === undefined) return para
+      const matchedToken = hit[0].match(/^(?:\[XX\]|[\d,]+)/)?.[0] ?? '[XX]'
+      return applyParaChanges(para, [{ pos: hit.index, len: matchedToken.length, replacement: tankStr }])
+    })
+  }
+
+  // ── Apartments count ─────────────────────────────────────────────────────
+  if (totalApts !== null) {
+    const aptStr = formatNum(String(totalApts))
+    // Replace the apartment count whether Claude filled a wrong number or left [XX] unfilled.
+    // The keyword guard (aptKws) ensures we only touch the project description sentence.
+    const aptKws = ['will include', 'comprises', 'containing', 'consist of', 'development of']
+    xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+      const texts: string[] = []
+      const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(para)) !== null) texts.push(m[1])
+      const combined = texts.join('')
+      if (!aptKws.some(kw => combined.includes(kw))) return para
+      // Match either an unfilled [XX] or an already-substituted number before "apartments"
+      const hit = combined.match(/(?:\[XX\]|\b\d{1,4}\b)\s*apartments/)
+      if (!hit || hit.index === undefined) return para
+      const matchedToken = hit[0].match(/^(?:\[XX\]|\d+)/)?.[0] ?? '[XX]'
+      const matchLen = matchedToken === '[XX]' ? 4 : matchedToken.length
+      return applyParaChanges(para, [{ pos: hit.index, len: matchLen, replacement: aptStr }])
+    })
+    // Table cell: row header "Total Dwellings", "Number of Dwellings", etc.
+    for (const pat of [/total\s+dwellings?/i, /number\s+of\s+(?:dwellings?|apartments?|units?)/i, /dwellings?\s+\(/i]) {
+      const prev = xml
+      xml = fillTableCellByHeader(xml, pat, aptStr)
+      if (xml !== prev) break
+    }
+  }
+
+  // ── Retail & commercial tenancy counts and areas ─────────────────────────
+  // Parse OE 2.x rawDataPoints for the Dwellings & Non-Residential Spaces table data.
+  {
+    const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+    if (oe2Raw.trim()) {
+      // Extract retail count, commercial/office count, retail area, commercial area
+      const retailCount = extractNumber(oe2Raw, [
+        /retail[:\s]+(\d+)\s*(?:tenanc|unit)/i,
+        /(\d+)\s*(?:x\s*)?retail\s*(?:tenanc|unit)/i,
+      ])
+      const commercialCount = extractNumber(oe2Raw, [
+        /(?:office|commercial)[:\s]+(\d+)\s*(?:tenanc|unit)/i,
+        /(\d+)\s*(?:x\s*)?(?:office|commercial)\s*(?:tenanc|unit)/i,
+      ])
+      const retailArea = extractNumber(oe2Raw, [
+        /retail[^.\n]*?(\d[\d,]*)\s*m2?\s*total/i,
+        /retail[^.\n]*?total[^.\n]*?(\d[\d,]*)\s*m2?/i,
+        /(\d[\d,]*)\s*m2?\s*(?:total\s*)?retail/i,
+      ])
+      const commercialArea = extractNumber(oe2Raw, [
+        /(?:office|commercial)[^.\n]*?(\d[\d,]*)\s*m2?\s*total/i,
+        /(?:office|commercial)[^.\n]*?total[^.\n]*?(\d[\d,]*)\s*m2?/i,
+        /(\d[\d,]*)\s*m2?\s*(?:total\s*)?(?:office|commercial)/i,
+      ])
+
+      // Fill [XX] retail tenancies in the main description sentence
+      if (retailCount !== null) {
+        let filled = false
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          if (filled) return para
+          const texts: string[] = []; const re = /<w:t[^>]*>([^<]*)<\/w:t>/g; let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (!/retail\s*tenanc/i.test(combined) || !combined.includes('[XX]')) return para
+          filled = true
+          const hit = combined.match(/\[XX\]\s*retail/)
+          if (!hit || hit.index === undefined) return para
+          return applyParaChanges(para, [{ pos: hit.index, len: 4, replacement: String(retailCount) }])
+        })
+      }
+
+      // Fill [XX] commercial tenancies in the main description sentence
+      if (commercialCount !== null) {
+        let filled = false
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          if (filled) return para
+          const texts: string[] = []; const re = /<w:t[^>]*>([^<]*)<\/w:t>/g; let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (!/commercial\s*tenanc/i.test(combined) || !combined.includes('[XX]')) return para
+          filled = true
+          const hit = combined.match(/\[XX\]\s*commercial/)
+          if (!hit || hit.index === undefined) return para
+          return applyParaChanges(para, [{ pos: hit.index, len: 4, replacement: String(commercialCount) }])
+        })
+      }
+
+      // Fill [XX]m2 retail area paragraph
+      if (retailArea !== null) {
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          const texts: string[] = []; const re = /<w:t[^>]*>([^<]*)<\/w:t>/g; let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (!/\bretail\b/i.test(combined) || !combined.includes('[XX]')) return para
+          if (!/m2|m²/i.test(combined)) return para
+          const hit = combined.match(/\[XX\]/)
+          if (!hit || hit.index === undefined) return para
+          return applyParaChanges(para, [{ pos: hit.index, len: 4, replacement: String(retailArea) }])
+        })
+      }
+
+      // Fill [XX]m2 commercial/office area paragraph
+      if (commercialArea !== null) {
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          const texts: string[] = []; const re = /<w:t[^>]*>([^<]*)<\/w:t>/g; let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (!/\b(?:commercial|office)\b/i.test(combined) || !combined.includes('[XX]')) return para
+          if (!/m2|m²/i.test(combined)) return para
+          const hit = combined.match(/\[XX\]/)
+          if (!hit || hit.index === undefined) return para
+          return applyParaChanges(para, [{ pos: hit.index, len: 4, replacement: String(commercialArea) }])
+        })
+      }
+    }
+  }
+
+  // ── Number of levels ─────────────────────────────────────────────────────
+  {
+    // Primary: use the stored buildingLevels field extracted from BESS page 2 Buildings table "Height"
+    // Fallback: regex scan of project name and all rawDataPoints
+    let val: string | null = project.buildingLevels != null ? String(project.buildingLevels) : null
+    if (!val) {
+      const searchCorpus = (project.name ?? '') + ' ' + credits.map(c => c.rawDataPoints ?? '').join(' ')
+      const levelsMatch =
+        searchCorpus.match(/(\d+)\s*[-–]?\s*(?:storey|storeys|level|levels|floor|floors)\b/i)
+        ?? searchCorpus.match(/(?:number of (?:storeys?|levels?|floors?)[:\s]+)(\d+)/i)
+        ?? searchCorpus.match(/(?:height|building)[^:\n]*:\s*(?:[\d.]+ ?m[,\s]+)?(\d+)[\s-]?(?:storey|level|floor)/i)
+        ?? searchCorpus.match(/(\d+)[\s-](?:storey|level|floor)\s+(?:building|development|residential|mixed)/i)
+        ?? searchCorpus.match(/(?:over|across|spanning)\s+(\d+)\s+(?:storey|storeys|level|levels|floor|floors)/i)
+        ?? searchCorpus.match(/(?:storey|storeys|level|levels|floor|floors)[:\s]+(\d+)/i)
+      val = levelsMatch?.[1] ?? null
+    }
+
+    if (val !== null) {
+      // Paragraph-level replacement for level-related context keywords
+      const levelsKws = ['constructed over', 'comprising', 'spanning', 'across', 'over [XX]', 'of [XX]']
+      xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+        const texts: string[] = []
+        const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(para)) !== null) texts.push(m[1])
+        const combined = texts.join('')
+        if (!levelsKws.some(kw => combined.includes(kw))) return para
+        if (!combined.includes('[XX]')) return para
+        return para.replace(/(<w:t[^>]*>)([^<]*)\[XX\]([^<]*)(<\/w:t>)/, `$1$2${val}$3$4`)
+      })
+      // Table cell: row header "Levels", "Number of Levels", "Storeys", etc.
+      for (const pat of [/number\s+of\s+(?:levels?|storeys?|floors?)/i, /^levels?$/i, /^storeys?$/i, /^height/i]) {
+        const prev = xml
+        xml = fillTableCellByHeader(xml, pat, val)
+        if (xml !== prev) break
+      }
+    }
+  }
 
   // ── OE 1.1: fill or remove thermal performance improvement % ─────────────
   {
@@ -836,8 +1102,9 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
         : xml.replace(/\[by XX%\]/g, `by ${improvement}%`)
     }
 
-    // Case 2: paragraph-level — remove "by [improvement%]" / "by 0%" when improvement
-    // is 0, or replace [improvement%] with the value when improvement > 0.
+    // Case 2: paragraph-level — covers "by [XX%]"/"by [improvement%]" split across
+    // runs, and "by 0%" from Claude. Uses applyParaChanges so "by " and the value
+    // are removed as a unit across runs.
     xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
       const texts: string[] = []
       const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
@@ -846,15 +1113,71 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
       const combined = texts.join('')
       if (!/(?:ncc|section j|thermal|envelope|J1|dts)/i.test(combined)) return para
       if (improvement === 0) {
-        const byHit = combined.match(/\s*\bby\s+(?:\[improvement%\]|0%)/i)
+        // Remove "by [improvement%]", "by [XX%]", or "by 0%" as a single unit
+        const byHit = combined.match(/\s*\bby\s+(?:\[improvement%\]|\[XX%\]|0%)/i)
         if (!byHit || byHit.index === undefined) return para
         return applyParaChanges(para, [{ pos: byHit.index, len: byHit[0].length, replacement: '' }])
       } else {
-        const hit = combined.match(/\[improvement%\]/i)
-        if (!hit || hit.index === undefined) return para
-        return applyParaChanges(para, [{ pos: hit.index, len: hit[0].length, replacement: `${improvement}%` }])
+        // Replace remaining placeholder with the improvement value
+        const xxHit = combined.match(/\[improvement%\]|\[XX%\]/i)
+        if (!xxHit || xxHit.index === undefined) return para
+        return applyParaChanges(para, [{ pos: xxHit.index, len: xxHit[0].length, replacement: `${improvement}%` }])
       }
     })
+
+  }
+
+  // ── Site area ─────────────────────────────────────────────────────────────
+  {
+    // Primary: stored siteArea field extracted from the BESS PDF during upload
+    // Fallback: regex scan of rawDataPoints (Urban Ecology / IWM credits sometimes mention it)
+    let siteVal: string | null = (project.siteArea != null && project.siteArea !== 0) ? formatNum(String(project.siteArea)) : null
+    if (siteVal === null) {
+      const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
+      const siteMatch = allRaw.match(/site\s+area[^:]*:?\s*([\d,]+)\s*m/i) ??
+                        allRaw.match(/([\d,]+)\s*m2?\s+site/i) ??
+                        allRaw.match(/total\s+site[^:]*:?\s*([\d,]+)/i) ??
+                        allRaw.match(/site[^:]*:\s*([\d,]+)/i)
+      siteVal = siteMatch ? siteMatch[1].replace(/,/g, '') : null
+    }
+    if (siteVal !== null) {
+      const val = siteVal
+      // Inline prose: "surface area of [XX]"
+      for (const kw of ['surface area of', 'site area of', 'area of']) {
+        const idx = xml.indexOf(kw)
+        if (idx === -1) continue
+        const w = xml.slice(idx, idx + 300)
+        if (!w.includes('[XX]')) continue
+        xml = xml.slice(0, idx) + w.replace('[XX]', val) + xml.slice(idx + 300)
+        break
+      }
+      // Table cell: row header "Site Area", "Total Site Area", etc.
+      for (const pat of [/site\s+area/i, /total\s+site/i]) {
+        const prev = xml
+        xml = fillTableCellByHeader(xml, pat, val)
+        if (xml !== prev) break
+      }
+    }
+  }
+
+  // ── Landscape irrigation: [XX] in SMP table row ─────────────────────────
+  {
+    const iwm31 = findCreditLike(credits, 'iwm 3.1')
+    let landDesc: string
+    if (iwm31?.rawDataPoints) {
+      const stripped = iwm31.rawDataPoints
+        .replace(/^project:\s*(?:yes|no)\s*[-–]\s*/i, '')
+        .replace(/^(?:yes|no)\s*[-–]\s*/i, '')
+        .trim()
+      landDesc = /^(?:yes|no)\.?$/i.test(stripped) || stripped === ''
+        ? 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'
+        : stripped
+    } else if (iwm31?.creditStatus === 'ScopedOut') {
+      landDesc = 'Not targeted.'
+    } else {
+      landDesc = 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'
+    }
+    xml = fillTableCellByHeader(xml, /^landscape irrigation$/i, landDesc)
   }
 
   // ── OE 1.3 Electrification: update metering row when all-electric ─────────
@@ -891,7 +1214,11 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
     }
   }
 
-  // ── Hot water: correct wrong bare-number fill in "to utilise" sentences ───
+  // ── Hot water: "to utilise [XX]" ─────────────────────────────────────────
+  // Fills [XX] in "The development is to utilise [XX]" paragraphs.
+  // Also corrects cases where Claude filled the slot with a bare number instead of a description.
+  // Search OE 2.x first (which may contain dwelling counts, not HW type), then fall back to all
+  // credits (to catch OE 2.5 or other hot water credits), then default to heat pump.
   {
     const hwRaw = getHotWaterRaw(credits)
     const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
@@ -904,13 +1231,138 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
       while ((m = re.exec(para)) !== null) texts.push(m[1])
       const combined = texts.join('')
       if (!/to utilise/i.test(combined)) return para
+
+      if (combined.includes('[XX]')) {
+        // Unfilled slot — use data-derived desc or fall back to heat pump default
+        const effectiveDesc = desc ?? 'a heat pump hot water system'
+        const escaped = escapeXml(effectiveDesc)
+        return para.replace(/(<w:t[^>]*>)([^<]*)\[XX\]([^<]*)(<\/w:t>)/, `$1$2${escaped}$3$4`)
+      }
+
+      // Already filled with a wrong bare number — replace it
       const wrongNumMatch = combined.match(/\bto utilise\s+(\d+(?:\.\d+)?)\b/i)
-      if (!wrongNumMatch) return para
-      const effectiveDesc = desc ?? 'a heat pump hot water system'
-      const escaped = escapeXml(effectiveDesc)
-      const numStart = combined.search(/\bto utilise\s+\d+(?:\.\d+)?\b/i) + 'to utilise '.length
-      return applyParaChanges(para, [{ pos: numStart, len: wrongNumMatch[1].length, replacement: escaped }])
+      if (wrongNumMatch) {
+        const effectiveDesc = desc ?? 'a heat pump hot water system'
+        const escaped = escapeXml(effectiveDesc)
+        const numStart = combined.search(/\bto utilise\s+\d+(?:\.\d+)?\b/i) + 'to utilise '.length
+        return applyParaChanges(para, [{ pos: numStart, len: wrongNumMatch[1].length, replacement: escaped }])
+      }
+
+      return para
     })
+  }
+
+  // ── IEQ 2.3: Non-residential ventilation description ─────────────────────
+  // Position 23 in Claude's array fills the "Ventilation – Non-Residential" cell;
+  // this fallback builds a description from rawDataPoints if that slot was left unfilled.
+  {
+    const ieq23 = findCredit(credits, 'ieq 2.3')
+    if (ieq23?.rawDataPoints) {
+      const raw23 = ieq23.rawDataPoints
+      const naturalPct = extractNumber(raw23, [
+        /natural(?:\s+ventilation)?[:\s]+(\d+(?:\.\d+)?)\s*%/i,
+        /(\d+(?:\.\d+)?)\s*%[^.\n]*natural/i,
+      ])
+      const outdoorAirPct = extractNumber(raw23, [
+        /outdoor\s+air[:\s]+(\d+(?:\.\d+)?)\s*%/i,
+        /(\d+(?:\.\d+)?)\s*%[^.\n]*outdoor\s+air/i,
+        /(\d+(?:\.\d+)?)\s*%[^.\n]*(?:increase|above)[^.\n]*AS\s*1668/i,
+      ])
+      const parts23: string[] = []
+      if (naturalPct && naturalPct > 0)
+        parts23.push(`${naturalPct}% of non-residential spaces are naturally ventilated.`)
+      if (outdoorAirPct && outdoorAirPct > 0)
+        parts23.push(`Mechanical ventilation will achieve outdoor air rates ${outdoorAirPct}% above the minimum AS 1668 requirements.`)
+      if (parts23.length > 0) {
+        const ventDesc = parts23.join(' ')
+        const escapedVent = escapeXml(ventDesc)
+        // Key-value row format: "Ventilation – Non-Residential" header + second cell
+        for (const pat of [/ventilation[^a-z]*non[- ]?resid/i, /non[- ]?resid.*ventilation/i]) {
+          const prev = xml
+          xml = fillTableCellByHeader(xml, pat, ventDesc)
+          if (xml !== prev) break
+        }
+        // Standalone cell format: [XX] in a paragraph within the ventilation section
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          const texts: string[] = []
+          const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+          let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (!combined.includes('[XX]') || !/ventilation/i.test(combined)) return para
+          return para.replace(/(<w:t[^>]*>)([^<]*)\[XX\]([^<]*)(<\/w:t>)/, `$1$2${escapedVent}$3$4`)
+        })
+      }
+    }
+  }
+
+  // ── IEQ 3.2 / 3.4: Thermal comfort shading — bullet-point fallback ─────────
+  // If Claude left "• [XX]" bullet placeholders unfilled, patch them from commentsGIW.
+  {
+    const shadingCredit = findCredit(credits, 'ieq 3.2') ?? findCredit(credits, 'ieq 3.4')
+    if (shadingCredit?.commentsGIW && xml.includes('[XX]')) {
+      const bullets = shadingCredit.commentsGIW
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => /^[•\-*]/.test(l))
+        .map(l => l.replace(/^[•\-*]\s*/, '').trim())
+        .filter(Boolean)
+
+      if (bullets.length > 0) {
+        let bulletIdx = 0
+        let inShadingSection = false
+        xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+          const texts: string[] = []
+          const re = /<w:t[^>]*>([^<]*)<\/w:t>/g
+          let m: RegExpExecArray | null
+          while ((m = re.exec(para)) !== null) texts.push(m[1])
+          const combined = texts.join('')
+          if (/shading to the following areas/i.test(combined)) { inShadingSection = true; return para }
+          if (!inShadingSection || !combined.includes('[XX]')) return para
+          if (bulletIdx >= bullets.length) return para
+          const replacement = escapeXml(bullets[bulletIdx++])
+          return para.replace(/(<w:t[^>]*>)([^<]*)\[XX\]([^<]*)(<\/w:t>)/, `$1$2${replacement}$3$4`)
+        })
+      }
+    }
+  }
+
+  // ── Winter sunlight: [XX% (XX out of XX)] of apartments achieve … ────────
+  if (xml.includes('[XX% (XX out of XX)]')) {
+    const ieq13 = findCredit(credits, 'ieq 1.3')
+    if (ieq13?.rawDataPoints) {
+      const fmt = formatBESSPercentage(ieq13.rawDataPoints, totalApts)
+      if (fmt) {
+        // Only replace the first occurrence (winter sunlight comes before ventilation)
+        xml = xml.replace('[XX% (XX out of XX)]', () => fmt)
+      }
+    }
+  }
+
+  // ── Natural ventilation: second [XX% (XX out of XX)] ─────────────────────
+  if (xml.includes('[XX% (XX out of XX)]')) {
+    const ieq23 = findCredit(credits, 'ieq 2.3')
+    if (ieq23?.rawDataPoints) {
+      const fmt = formatBESSPercentage(ieq23.rawDataPoints, totalApts)
+      if (fmt) xml = xml.replace('[XX% (XX out of XX)]', () => fmt)
+    }
+  }
+
+  // ── IEQ 2.3: CO2 ppm — fill 'concentrations below [XX]ppm' ─────────────────
+  {
+    const co2Idx = xml.indexOf('concentrations below')
+    if (co2Idx !== -1) {
+      const window = xml.slice(co2Idx, co2Idx + 500)
+      if (window.includes('[XX]')) {
+        const ieq23 = findCredit(credits, 'ieq 2.3')
+        const co2Match = ieq23?.rawDataPoints?.match(/(\d{3,4})\s*ppm/i) ??
+                         ieq23?.rawDataPoints?.match(/CO2[^:]*:?\s*(\d{3,4})/i)
+        if (co2Match) {
+          const fixed = window.replace('[XX]', co2Match[1])
+          xml = xml.slice(0, co2Idx) + fixed + xml.slice(co2Idx + 500)
+        }
+      }
+    }
   }
 
   return xml
@@ -1162,6 +1614,7 @@ function insertInnovationRows(xml: string, credits: ReportCreditData[]): string 
       return t === creditLower || t.startsWith(creditLower + ' ') || creditLower.startsWith(t + ' ')
     })
     if (match) {
+      // Fill [XX] placeholder in second cell if present
       result = fillTableCellByHeader(result, new RegExp(escapeRegex(match.text), 'i'), (credit.rawDataPoints ?? '').trim())
     } else {
       unmatched.push(credit)
@@ -1559,15 +2012,27 @@ async function fillWordTemplate(
   // Extract document paragraphs and criteria row texts for context
   const docXml = zip.file('word/document.xml')!.asText()
 
-  const criteriaNames = extractTableRowTexts(docXml)
+  // Criteria names come from the no-bedrooms version to avoid spurious row text
+  const docXmlNoBedrooms = deleteParagraphsByText(docXml, [
+    /\[XX\].*\d[\s-]?bed(?:room)?s?\b/i,
+    /\d[\s-]?bed(?:room)?s?.*\[XX\]/i,
+  ])
+  const criteriaNames = extractTableRowTexts(docXmlNoBedrooms)
   const paragraphs = extractDocParagraphs(docXml)
 
-  // Escape brackets that Docxtemplater can't handle (orphaned ] characters)
+  // Extract [XX] occurrences from the FULL document so bedroom breakdown lines are
+  // counted as positions — Claude leaves them as "[XX]" (unfilled) so they stay
+  // visible in the output document.
+  const xxOccurrences = extractXXOccurrences(docXml)
+  console.log(`[report] Template has ${xxOccurrences.length} [XX] occurrences`)
+
+  // Escape long-form [XX...] placeholders before Docxtemplater sees them
+  // (Docxtemplater's expression parser can't handle spaces/periods in tag names)
   const escapedDocXml = escapeLongXXTags(docXml)
   zip.file('word/document.xml', escapedDocXml)
 
-  // Ask Claude to supply named values and decide which rows to delete
-  const { rowsToDelete, council, namedValues } = await getWordFillData(project, credits, paragraphs, criteriaNames)
+  // Ask Claude to fill all [XX], [XXX], etc. and decide which rows to delete
+  const { placeholders, rowsToDelete, council, namedValues } = await getWordFillData(project, credits, paragraphs, criteriaNames, xxOccurrences)
 
   // Authoritative database fields always override Claude's named values
   const dbNameMap: Array<[string[], string | null]> = [
@@ -1762,71 +2227,8 @@ async function fillWordTemplate(
     }
   }
 
-  // ── Landscape irrigation (code-level, overrides Claude) ───────────────────
-  {
-    const iwm31 = findCreditLike(credits, 'iwm 3.1')
-    let landDesc: string
-    if (iwm31?.rawDataPoints) {
-      const stripped = iwm31.rawDataPoints
-        .replace(/^project:\s*(?:yes|no)\s*[-–]\s*/i, '')
-        .replace(/^(?:yes|no)\s*[-–]\s*/i, '')
-        .trim()
-      landDesc = /^(?:yes|no)\.?$/i.test(stripped) || stripped === ''
-        ? 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'
-        : stripped
-    } else if (iwm31?.creditStatus === 'ScopedOut') {
-      landDesc = 'Not targeted.'
-    } else {
-      landDesc = 'Native vegetation has been specified for the development with no supplementary irrigation required after the establishment period.'
-    }
-    namedValues['Landscape Irrigation'] = landDesc
-    namedValues['landscape irrigation'] = landDesc
-  }
-
-  // ── Natural ventilation % code-level fallback ─────────────────────────────
-  if (!namedValues['natural ventilation% (XX out of XX)']) {
-    const ieq23nv = findCreditLike(credits, 'ieq 2.3')
-    if (ieq23nv?.rawDataPoints) {
-      const totalApts = project.totalDwellings ?? getTotalApartments(credits)
-      const fmt = formatBESSPercentage(ieq23nv.rawDataPoints, totalApts)
-      if (fmt) namedValues['natural ventilation% (XX out of XX)'] = fmt
-    }
-  }
-
-  // ── Ventilation non-resi code-level fallback ──────────────────────────────
-  if (!namedValues['ventilation non-resi'] && !namedValues['Ventilation Non-Resi']) {
-    const ieq23v = findCredit(credits, 'ieq 2.3')
-    if (ieq23v?.rawDataPoints) {
-      const raw23 = ieq23v.rawDataPoints
-      const naturalPct = extractNumber(raw23, [
-        /natural(?:\s+ventilation)?[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-        /(\d+(?:\.\d+)?)\s*%[^.\n]*natural/i,
-      ])
-      const outdoorAirPct = extractNumber(raw23, [
-        /outdoor\s+air[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-        /(\d+(?:\.\d+)?)\s*%[^.\n]*outdoor\s+air/i,
-        /(\d+(?:\.\d+)?)\s*%[^.\n]*(?:increase|above)[^.\n]*AS\s*1668/i,
-      ])
-      const parts23: string[] = []
-      if (naturalPct && naturalPct > 0)
-        parts23.push(`${naturalPct}% of non-residential spaces are naturally ventilated.`)
-      if (outdoorAirPct && outdoorAirPct > 0)
-        parts23.push(`Mechanical ventilation will achieve outdoor air rates ${outdoorAirPct}% above the minimum AS 1668 requirements.`)
-      if (parts23.length > 0) {
-        const ventDesc = parts23.join(' ')
-        namedValues['ventilation non-resi'] = ventDesc
-        namedValues['Ventilation Non-Resi'] = ventDesc
-      }
-    }
-  }
-
-  // ── CO2 ppm code-level fallback ───────────────────────────────────────────
-  if (!namedValues['CO2 ppm']) {
-    const ieq23co2 = findCredit(credits, 'ieq 2.3')
-    const co2Match = ieq23co2?.rawDataPoints?.match(/(\d{3,4})\s*ppm/i) ??
-                     ieq23co2?.rawDataPoints?.match(/CO2[^:]*:?\s*(\d{3,4})/i)
-    if (co2Match) namedValues['CO2 ppm'] = co2Match[1]
-  }
+  // Per-occurrence counters for generic tags
+  const counters: Record<string, number> = {}
 
   const unwrapDocxtemplaterError = (err: unknown): never => {
     const e = err as any
@@ -1857,10 +2259,18 @@ async function fillWordTemplate(
         }
         if (namedFallbacks[tag] !== undefined) return namedFallbacks[tag]
 
-        // Check named values (case-insensitive)
+        // Check named values (case-insensitive) — covers all new named placeholders in MixUse/Comm templates
         const tagKey = tag.trim().toLowerCase()
         for (const [k, v] of Object.entries(namedValues)) {
           if (k.trim().toLowerCase() === tagKey) return formatNum(v)
+        }
+
+        counters[tag] = (counters[tag] ?? 0) + 1
+        const idx = counters[tag] - 1
+        const vals = placeholders[tag]
+        if (vals && idx < vals.length && vals[idx] !== undefined) {
+          const v = String(vals[idx])
+          if (v !== '') return v
         }
 
         return '[' + tag + ']'
@@ -2333,12 +2743,18 @@ async function fillWordTemplate(
         (ieq23 && raw && co2Ppm === null && !/CO2|carbon dioxide|sensor/i.test(raw)))
       renderedXml = deleteParagraphsByText(renderedXml, [/CO2 sensors are to be installed/i])
 
+    // Delete paragraphs that still have unfilled [XX%] placeholders (Claude couldn't determine value)
+    // — runs regardless of whether rawDataPoints exist, catching any leftover placeholders
+    renderedXml = deleteParagraphsByText(renderedXml, [
+      /\[XX%\].*non-residential spaces is naturally ventilated/i,
+      /\[XX%\].*increase in outdoor air rates/i,
+    ])
   }
 
   // ── Ceiling fans: delete line when 0% or unfilled ─────────────────────────
   renderedXml = deleteParagraphsByText(renderedXml, [
-    /(?:\b0%\b|\[fans\]%|\[Fans\]%).*ceiling fan/i,
-    /ceiling fan.*(?:\b0%\b|\[fans\]%|\[Fans\]%)/i,
+    /(?:\b0%\b|\[XX\]%|\[XX%\]|\[fans\]%|\[Fans\]%).*ceiling fan/i,
+    /ceiling fan.*(?:\b0%\b|\[XX\]%|\[XX%\]|\[fans\]%|\[Fans\]%)/i,
   ])
 
   // ── Retail / commercial line items ────────────────────────────────────────
