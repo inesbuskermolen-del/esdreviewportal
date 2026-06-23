@@ -431,7 +431,7 @@ ${giwXXCredits.map(c => `    "${c.creditId}": "<fill all [XX] in the GIW comment
     "Shower WELS": "<same as shower WELS>",
     "Dishwasher WELS": "<dishwasher WELS star rating from IWM 1.1 or null>",
     "Average star rating": "<average WELS star rating from IWM 1.1, e.g. '4.0', or null>",
-    "DTS improvement": "<thermal performance improvement % above minimum from OE 1.x e.g. '15%', or null>",
+    "improvement%": "<thermal performance improvement % above minimum from OE 1.x e.g. '15%', or null>",
     "Hot water": "<hot water system description e.g. 'a heat pump hot water system' from OE 3.x, or null>",
     "solar PV": "<solar PV system size as 'X kW' from OE 4.x, or null>",
     "Solar PV": "<same as solar PV>",
@@ -1592,7 +1592,7 @@ async function fillWordTemplate(
   const dbNameMap: Array<[string[], string | null]> = [
     [['total apartments', 'total townhouses'], project.totalDwellings != null ? String(project.totalDwellings) : null],
     [['building height', 'Building Height'], project.buildingLevels != null ? String(project.buildingLevels) : null],
-    [['site area', 'Sit area'], project.siteArea != null ? String(project.siteArea) : null],
+    [['site area', 'Site area'], project.siteArea != null ? String(project.siteArea) : null],
     [['BESS score'], project.bessScore != null ? String(Math.round(project.bessScore)) : null],
     [['rainwater tank size'], project.rainwaterTankSize != null ? String(project.rainwaterTankSize) : null],
   ]
@@ -1701,6 +1701,19 @@ async function fillWordTemplate(
       if (fmt) {
         namedValues['winter sunlight% (XX out of XX)'] = fmt
         console.log('[report] Winter sunlight from IEQ 1.3:', fmt)
+      }
+    }
+  }
+
+  // ── Natural ventilation % from IEQ 2.3 ──────────────────────────────────
+  if (!namedValues['natural ventilation% (XX out of XX)']) {
+    const ieq23nv = findCreditLike(credits, 'ieq 2.3')
+    if (ieq23nv?.rawDataPoints) {
+      const totalApts = project.totalDwellings ?? getTotalApartments(credits)
+      const fmt = formatBESSPercentage(ieq23nv.rawDataPoints, totalApts)
+      if (fmt) {
+        namedValues['natural ventilation% (XX out of XX)'] = fmt
+        console.log('[report] Natural ventilation from IEQ 2.3:', fmt)
       }
     }
   }
