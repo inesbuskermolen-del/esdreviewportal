@@ -781,11 +781,12 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
     ])
   }
 
-  // ── Delete non-residential-only criteria when project has no non-resi space ─
-  if (!hasRetail && !hasCommercial) {
-    xml = deleteParagraphsByText(xml, [
-      /internal\s+lighting[^a-z]*non[- ]?resid/i,
-    ])
+  // ── Internal Lighting – Non-Residential: remove inapplicable bullet lines ─
+  if (!hasRetail) {
+    xml = deleteParagraphsByText(xml, [/retail[^a-z]*no greater than[^a-z]*14\s*w/i])
+  }
+  if (!hasCommercial) {
+    xml = deleteParagraphsByText(xml, [/office[^a-z]*no greater than[^a-z]*4\.5\s*w/i])
   }
 
   if (hasRetail && hasCommercial) return xml
