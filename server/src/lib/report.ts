@@ -702,7 +702,8 @@ function replaceThirdCellContent(
   xml: string,
   rowPattern: RegExp,
   newText: string,
-  keepPattern?: RegExp,
+  keepBeforePattern?: RegExp,
+  keepAfterPattern?: RegExp,
 ): string {
   let i = 0
   while (i < xml.length) {
@@ -719,14 +720,17 @@ function replaceThirdCellContent(
         const firstP  = allParas[0] ?? null
         const pPr     = firstP ? ((firstP.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/) ?? [])[0] ?? '') : ''
         const rPr     = firstP ? ((firstP.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/) ?? [])[0] ?? '') : ''
-        const kept    = keepPattern
-          ? allParas.filter(p => keepPattern.test(p.replace(/<[^>]+>/g, ' ')))
+        const keptBefore = keepBeforePattern
+          ? allParas.filter(p => keepBeforePattern.test(p.replace(/<[^>]+>/g, ' ')))
+          : []
+        const keptAfter = keepAfterPattern
+          ? allParas.filter(p => keepAfterPattern.test(p.replace(/<[^>]+>/g, ' ')))
           : []
         const lines   = newText.split('\n').map(l => l.trim()).filter(Boolean)
         const paras   = lines.map(line =>
           `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`
         ).join('')
-        const newCell  = `<w:tc>${tcPr}${paras}${kept.join('')}</w:tc>`
+        const newCell  = `<w:tc>${tcPr}${keptBefore.join('')}${paras}${keptAfter.join('')}</w:tc>`
         const thirdMatch = cells[2]
         const newRow   = rowXml.slice(0, thirdMatch.index!) + newCell +
                          rowXml.slice(thirdMatch.index! + thirdMatch[0].length)
@@ -1704,7 +1708,9 @@ async function fillWordTemplate(
 
       if (!namedValues['Blue Factor score']) {
         const m = workingText.match(/blue\s*factor[^:\n]*:\s*([\d.]+)/i) ??
-                  workingText.match(/([\d.]+)\s*(?:blue\s*factor|bf\b)/i)
+                  workingText.match(/blue\s*factor\s+(?:score\s+)?of\s+([\d.]+)/i) ??
+                  workingText.match(/blue\s*factor\s*=\s*([\d.]+)/i) ??
+                  workingText.match(/([\d.]+)\s*%?\s*(?:blue\s*factor|bf\b)/i)
         if (m) {
           namedValues['Blue Factor score'] = m[1]
           console.log('[report] Blue Factor score from IWM 2.1:', m[1])
@@ -1859,15 +1865,17 @@ async function fillWordTemplate(
         /moped[^.\n]*?:\s*(\d+)/i,
       ])
       if (moto !== null) { set(['motorbikes', 'Motorbikes'], moto); console.log('[report] motorbikes:', moto) }
+    }
+  }
 
-      // Transport 2.3 only reports achieved/not achieved — hardcode 5 spaces when achieved
-      if (moto === null) {
-        const t23 = findCreditLike(credits, 'transport 2.3')
-        if (/^(y|yes|achieved|targeted)$/i.test(t23?.creditStatus ?? '')) {
-          set(['motorbikes', 'Motorbikes'], 5)
-          console.log('[report] motorbikes: 5 (Transport 2.3 achieved)')
-        }
-      }
+  // Transport 2.3 only reports achieved/not achieved — hardcode 5 spaces when achieved
+  // Runs outside the transportRaw guard so it fires even when rawDataPoints is empty
+  if (!namedValues['motorbikes']) {
+    const t23 = findCreditLike(credits, 'transport 2.3')
+    if (/^(y|yes|achieved|targeted)$/i.test(t23?.creditStatus ?? '')) {
+      namedValues['motorbikes'] = '5'
+      namedValues['Motorbikes'] = '5'
+      console.log('[report] motorbikes: 5 (Transport 2.3 achieved)')
     }
   }
 
@@ -1972,7 +1980,7 @@ async function fillWordTemplate(
 
   if (rowsToDelete.length > 0) {
     // These rows must always remain regardless of credit status
-    const NEVER_DELETE = /embodied\s*energy|structural.*steel|sustainable\s*timber|\bpvc\b|sustainable\s*products|building\s*re-?use|bicycle\s*parking|end\s*of\s*trip|motorbike/i
+    const NEVER_DELETE = /embodied\s*energy|structural.*steel|sustainable\s*timber|\bpvc\b|sustainable\s*products|building\s*re-?use|bicycle\s*parking|end\s*of\s*trip|motorbike|construction\s*and\s*demolition\s*waste/i
     const safeToDelete = rowsToDelete.filter(r => !NEVER_DELETE.test(r))
     if (safeToDelete.length > 0) {
       safeApply('deleteTableRows', () => {
@@ -2142,6 +2150,16 @@ async function fillWordTemplate(
     }
   }
 
+  // ── Electric vehicle charging dropdown (Transport 2.1) ───────────────────
+  {
+    const t21 = findCreditLike(credits, 'transport 2.1')
+    const t21Achieved = /^(y|yes|achieved|targeted)$/i.test(t21?.creditStatus ?? '')
+    const evItem = t21Achieved
+      ? 'One charging point for electrical vehicles is integrated in the proposed development'
+      : 'No car parking spaces are specifically intended for electric vehicles.'
+    renderedXml = setDropdownContent(renderedXml, 'One charging point for electrical vehicles is integrated in the proposed development', evItem)
+  }
+
   // ── Landscape irrigation dropdown ─────────────────────────────────────────
   {
     const iwm31 = findCreditLike(credits, 'iwm 3.1')
@@ -2165,6 +2183,8 @@ async function fillWordTemplate(
     const brStatus = buildingReuse?.creditStatus ?? ''
     const isTargeted = /^(y|achieved|targeted|yes)$/i.test(brStatus)
 
+    const isScopedOut = /scoped.?out/i.test(brStatus)
+
     if (isTargeted) {
       // Set and flatten both dropdown instances (loop until none remain)
       let attempts = 0
@@ -2173,8 +2193,16 @@ async function fillWordTemplate(
         renderedXml = flattenDropdown(renderedXml, BUILDING_REUSE_OPT)
         attempts++
       }
+    } else if (isScopedOut) {
+      // No existing building on site — select the scoped-out option and flatten
+      let attempts = 0
+      while (renderedXml.includes(`displayText="${BUILDING_REUSE_OPT}"`) && attempts < 4) {
+        renderedXml = setDropdownContent(renderedXml, BUILDING_REUSE_OPT, 'There is no existing building on the proposed site.')
+        renderedXml = flattenDropdown(renderedXml, BUILDING_REUSE_OPT)
+        attempts++
+      }
     } else {
-      // Not targeted (including Scoped Out) — delete all Building Reuse table rows
+      // Not targeted — delete all Building Reuse table rows
       renderedXml = deleteTableRows(renderedXml, ['Building Re-use', 'Building Reuse'])
       renderedXml = deleteTableRowsContaining(renderedXml, BUILDING_REUSE_OPT)
     }
@@ -2215,9 +2243,41 @@ async function fillWordTemplate(
         filledGIWComments['waste 2.2'] ?? waste22.commentsGIW.trim())
 
     const iwm21 = findCreditLike(credits, 'iwm 2.1')
-    if (iwm21?.commentsGIW?.trim())
+    if (iwm21?.commentsGIW?.trim()) {
+      const iwm21Text = filledGIWComments['iwm 2.1'] ?? iwm21.commentsGIW.trim()
       renderedXml = replaceThirdCellContent(renderedXml, /^Stormwater\s*Treatment$/i,
-        filledGIWComments['iwm 2.1'] ?? iwm21.commentsGIW.trim(), /Refer\s*WSUD|Blue\s*Factor\s*rating.*achieved/i)
+        iwm21Text,
+        /Blue\s*Factor\s*rating.*achieved/i,
+        /Refer\s*WSUD/i)
+
+      // ── WSUD appendix: replace Blue Factor bullet points with same GIW comment ──
+      // Delete the raingarden bullet first, then replace the tank bullet with the comment
+      renderedXml = deleteParagraphsByText(renderedXml, [
+        /rainwater.*collected from.*raingarden/i,
+        /raingarden.*extended\s+detention/i,
+      ])
+      let wsudReplaced = false
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
+        if (wsudReplaced) return para
+        const combined = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m: RegExpMatchArray) => m[1]).join('')
+        if (!/rainwater.*collected from/i.test(combined)) return para
+        const pPr = (para.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/) ?? [])[0] ?? ''
+        const rPr = (para.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/) ?? [])[0] ?? ''
+        const newParas = iwm21Text.split('\n').map((l: string) => l.trim()).filter(Boolean).map((line: string) =>
+          `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`
+        ).join('')
+        wsudReplaced = true
+        return newParas
+      })
+    }
+
+    // Fill any remaining [Blue Factor score] placeholder (post-render safety net)
+    const bfScore = namedValues['Blue Factor score']
+    if (bfScore) {
+      renderedXml = renderedXml.replace(/<w:t([^>]*)>([^<]*)<\/w:t>/g, (_m: string, attrs: string, text: string) =>
+        `<w:t${attrs}>${text.replace(/\[Blue Factor score\]/gi, bfScore)}</w:t>`
+      )
+    }
 
     const shadingCredit = findCreditLike(credits, 'ieq 3.2') ?? findCreditLike(credits, 'ieq 3.4')
     if (shadingCredit?.commentsGIW?.trim()) {
