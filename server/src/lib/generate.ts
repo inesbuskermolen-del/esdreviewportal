@@ -352,12 +352,23 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
-    // OE 1.1 / OE 1.2: always mark status as Achieved, then fall through to template for comment
-    if (/^oe\s+1\.[12]$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
-      await prisma.credit.update({
-        where: { id: credit.id },
-        data: { creditStatus: 'Y' },
-      })
+    // OE 1.1: always mark as Achieved (mandatory credit, compliance assumed)
+    if (/^oe\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      await prisma.credit.update({ where: { id: credit.id }, data: { creditStatus: 'Y' } })
+    }
+
+    // OE 1.2: mark as Achieved only if average NatHERS star rating ≥ 7
+    if (/^oe\s+1\.2$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const starsMatch =
+        raw.match(/average[^:\n]*:\s*(\d+(?:\.\d+)?)\s*star/i) ??
+        raw.match(/(\d+(?:\.\d+)?)\s*star[^s]*average/i) ??
+        raw.match(/(\d+(?:\.\d+)?)\s*stars?\s*average/i) ??
+        raw.match(/average\s*(?:star\s*)?rating[^:\n]*:\s*(\d+(?:\.\d+)?)/i)
+      const avgStars = starsMatch ? parseFloat(starsMatch[1]) : null
+      if (avgStars !== null && avgStars >= 7) {
+        await prisma.credit.update({ where: { id: credit.id }, data: { creditStatus: 'Y' } })
+      }
     }
 
     // IEQ 1.1 / IEQ 1.2: deterministically fill the daylight percentage
