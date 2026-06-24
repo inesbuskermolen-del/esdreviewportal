@@ -8,6 +8,27 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1)
 })
 
+// Graceful shutdown: mark any in-progress generations as error before exiting.
+// This prevents generationStatus getting stuck at 'running' when ts-node-dev restarts.
+async function shutdownCleanly(signal: string): Promise<void> {
+  console.log(`[shutdown] ${signal} — resetting in-progress generations`)
+  try {
+    // Lazily import to avoid circular dependency at module load time
+    const { prisma } = await import('./lib/prisma')
+    const { count } = await prisma.project.updateMany({
+      where: { generationStatus: 'running' },
+      data: { generationStatus: 'error' },
+    })
+    if (count > 0) console.log(`[shutdown] Reset ${count} project(s) to error`)
+  } catch (err) {
+    console.error('[shutdown] Cleanup failed:', err)
+  }
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => { shutdownCleanly('SIGTERM').catch(console.error) })
+process.on('SIGINT',  () => { shutdownCleanly('SIGINT').catch(console.error) })
+
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'

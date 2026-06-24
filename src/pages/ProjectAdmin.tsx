@@ -79,6 +79,7 @@ export default function ProjectAdmin() {
   const [notifyEmail, setNotifyEmail] = useState('')
   const [notifyEmailSaved, setNotifyEmailSaved] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollStartRef = useRef<number | null>(null)
 
   const interactiveBESS = useMemo(() => {
     if (project?.bessScore == null) return null
@@ -124,7 +125,14 @@ export default function ProjectAdmin() {
   const startPolling = useCallback(() => {
     if (!id) return
     stopPolling()
+    pollStartRef.current = Date.now()
     pollRef.current = setInterval(async () => {
+      // Stop after 12 minutes — generation should finish well before then
+      if (pollStartRef.current && Date.now() - pollStartRef.current > 12 * 60 * 1000) {
+        stopPolling()
+        setGenStatus('error')
+        return
+      }
       try {
         const res = await axios.get<{ status: string }>(
           `/api/projects/${id}/generation-status`,
