@@ -1426,6 +1426,42 @@ function findSheetXmlPath(zip: PizZip, sheetName: string): string {
   return target.startsWith('worksheets/') ? `xl/${target}` : target
 }
 
+function getInlineDropdownOptions(wsXml: string, cellRef: string): string[] | null {
+  const dvRe = /<dataValidation\s[^>]*sqref="([^"]+)"[^>]*>[\s\S]*?<formula1>"([^"]*)"[\s\S]*?<\/dataValidation>/g
+  let m: RegExpExecArray | null
+  while ((m = dvRe.exec(wsXml)) !== null) {
+    if (m[1].split(/\s+/).includes(cellRef)) {
+      return m[2].split(',').map((s: string) => s.trim()).filter(Boolean)
+    }
+  }
+  return null
+}
+
+function bestDropdownMatch(value: string, options: string[]): string {
+  const val = value.toLowerCase().trim()
+  const exact = options.find(o => o.toLowerCase() === val)
+  if (exact) return exact
+  const starts = options.find(o => o.toLowerCase().startsWith(val) || val.startsWith(o.toLowerCase()))
+  if (starts) return starts
+  const contains = options.find(o => o.toLowerCase().includes(val) || val.includes(o.toLowerCase()))
+  if (contains) return contains
+  const valWords = val.split(/\W+/).filter(Boolean)
+  let bestScore = -1
+  let best = options[0]
+  for (const o of options) {
+    const oWords = o.toLowerCase().split(/\W+/).filter(Boolean)
+    const overlap = valWords.reduce((n: number, w: string) => n + (oWords.some((ow: string) => ow.includes(w) || w.includes(ow)) ? 1 : 0), 0)
+    if (overlap > bestScore) { bestScore = overlap; best = o }
+  }
+  return best
+}
+
+function patchCellDropdown(wsXml: string, cellRef: string, value: string): string {
+  const options = getInlineDropdownOptions(wsXml, cellRef)
+  const toWrite = (options && options.length > 0) ? bestDropdownMatch(value, options) : value
+  return patchCell(wsXml, cellRef, toWrite)
+}
+
 function patchCell(wsXml: string, cellRef: string, value: string | number): string {
   const r = cellRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   if (typeof value === 'number') {
@@ -2599,7 +2635,7 @@ function fillExcelResidential(
       /system type[^:]*:\s*([^.;,\n]+)/i,
       /(split system|vrv|vrf|heat pump|ducted|fan coil)[^\s,;.]*/i,
     ])
-    if (hvac) { ws = patchCell(ws, 'D26', hvac); ws = patchCell(ws, 'D27', hvac) }
+    if (hvac) { ws = patchCellDropdown(ws, 'D26', hvac); ws = patchCellDropdown(ws, 'D27', hvac) }
   }
 
   const lighting = findCredit(credits, 'oe 3.5') ?? findCredit(credits, 'oe 3.6')
@@ -2611,7 +2647,7 @@ function fillExcelResidential(
   const oe26 = findCredit(credits, 'oe 2.6')
   if (oe26?.rawDataPoints) {
     const cooktop = extractText(oe26.rawDataPoints, [/cooktop[^:]*:\s*([^.;,\n]+)/i, /(induction|gas|electric)[^.;,\n]*/i])
-    if (cooktop) ws = patchCell(ws, 'D32', cooktop)
+    if (cooktop) ws = patchCellDropdown(ws, 'D32', cooktop)
   }
 
   const solar = findCredit(credits, 'oe 4.2') ?? findCredit(credits, 'oe 4.5')
@@ -2644,7 +2680,7 @@ function fillExcelResidential(
       /type[^:]*:\s*([^.;,\n]+)/i,
       /(heat pump|electric|gas|solar|instantaneous)[^.;,\n]*/i,
     ]) : null
-    if (hwType) ws = patchCell(ws, 'D51', hwType)
+    if (hwType) ws = patchCellDropdown(ws, 'D51', hwType)
   }
 
   const iwm11 = findCredit(credits, 'iwm 1.1')
@@ -2691,7 +2727,7 @@ function fillExcelNonResidential(
       /(split system|vrv|vrf|heat pump|ducted|fan coil)[^\s,;.]*/i,
     ])
     if (hvac) {
-      for (const cell of ['D24', 'I24', 'M24', 'Q24', 'U24']) ws = patchCell(ws, cell, hvac)
+      for (const cell of ['D24', 'I24', 'M24', 'Q24', 'U24']) ws = patchCellDropdown(ws, cell, hvac)
     }
   }
 
@@ -2716,7 +2752,7 @@ function fillExcelNonResidential(
       /type[^:]*:\s*([^.;,\n]+)/i,
       /(heat pump|electric|gas|solar|instantaneous)[^.;,\n]*/i,
     ]) : null
-    if (hwType) { ws = patchCell(ws, 'D53', hwType); ws = patchCell(ws, 'I53', hwType) }
+    if (hwType) { ws = patchCellDropdown(ws, 'D53', hwType); ws = patchCellDropdown(ws, 'I53', hwType) }
   }
 
   const iwm11 = findCredit(credits, 'iwm 1.1')
