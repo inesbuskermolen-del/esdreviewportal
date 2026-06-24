@@ -35,10 +35,11 @@ function extractPostcode(address: string | null): number | null {
 }
 
 // NatHERS climate zone → BADS cooling load dropdown value
+// Values must match displayText exactly as they appear in the Word templates
 const BADS_COOLING_LOAD: Record<number, string> = {
   21: '30 MJ/m2',
   60: '22MJ/m2',
-  62: '21MJ/m2',
+  62: '21MJ/M2',
 }
 
 const WORD_TEMPLATES: Record<string, string> = {
@@ -235,7 +236,7 @@ function setDropdownContent(xml: string, identifyingOption: string, selectedValu
   let pos = xml.indexOf(`displayText="${identifyingOption}"`)
   if (pos === -1) {
     const escaped = identifyingOption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const m = xml.match(new RegExp(`displayText="[^"]*${escaped}[^"]*"`))
+    const m = xml.match(new RegExp(`displayText="[^"]*${escaped}[^"]*"`, 'i'))
     if (!m) return xml
     pos = xml.indexOf(m[0])
     if (pos === -1) return xml
@@ -245,12 +246,17 @@ function setDropdownContent(xml: string, identifyingOption: string, selectedValu
   const sdtPrStart = xml.lastIndexOf('<w:sdtPr', pos)
   const sdtStart = sdtPrStart !== -1 ? xml.lastIndexOf('<w:sdt', sdtPrStart) : -1
 
+  // Snap selectedValue to the closest matching displayText option in this dropdown
+  const sdtBlock = sdtStart !== -1 ? xml.slice(sdtStart, xml.indexOf('</w:sdt>', sdtStart) + 8) : ''
+  const optionTexts = [...sdtBlock.matchAll(/displayText="([^"]*)"/g)].map(m => m[1])
+  const snapped = optionTexts.length > 0 ? bestDropdownMatch(selectedValue, optionTexts) : selectedValue
+
   const contentStart = xml.indexOf('<w:sdtContent', pos)
   if (contentStart === -1) return xml
   const contentEnd = xml.indexOf('</w:sdtContent>', contentStart) + '</w:sdtContent>'.length
   const sdtEnd = xml.indexOf('</w:sdt>', contentEnd) + '</w:sdt>'.length
 
-  const escaped = selectedValue.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const escaped = snapped.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
   // Update <w:sdtContent>: replace text, strip placeholder run style, force black colour
   let content = xml.slice(contentStart, contentEnd)
@@ -704,6 +710,7 @@ function replaceThirdCellContent(
   newText: string,
   keepBeforePattern?: RegExp,
   keepAfterPattern?: RegExp,
+  padNewText?: boolean,
 ): string {
   let i = 0
   while (i < xml.length) {
@@ -730,7 +737,9 @@ function replaceThirdCellContent(
         const paras   = lines.map(line =>
           `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`
         ).join('')
-        const newCell  = `<w:tc>${tcPr}${keptBefore.join('')}${paras}${keptAfter.join('')}</w:tc>`
+        const blankPara = `<w:p>${pPr}</w:p>`
+        const paddedParas = padNewText ? `${blankPara}${paras}${blankPara}` : paras
+        const newCell  = `<w:tc>${tcPr}${keptBefore.join('')}${paddedParas}${keptAfter.join('')}</w:tc>`
         const thirdMatch = cells[2]
         const newRow   = rowXml.slice(0, thirdMatch.index!) + newCell +
                          rowXml.slice(thirdMatch.index! + thirdMatch[0].length)
@@ -747,15 +756,17 @@ function replaceThirdCellContent(
  * Falls back to typology when rawDataPoints don't mention them.
  */
 function detectNonResidential(credits: ReportCreditData[], typology: string | null): { hasRetail: boolean; hasCommercial: boolean } {
-  const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join(' ')
+  // Search all credits' rawDataPoints, not just OE 2.x — BESS data may use any credit to describe the mix
+  const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
   const t = (typology ?? '').toLowerCase()
   // Pure residential — never has retail/commercial
   if (t === 'multi-residential' || t === 'townhouse') return { hasRetail: false, hasCommercial: false }
-  if (t === 'non-residential') return { hasRetail: /retail/i.test(oe2Raw), hasCommercial: true }
+  // Retail includes "shop/shops" since BESS PDFs may use that terminology
+  const rawHasRetail = /retail|shop/i.test(allRaw)
+  const rawHasCommercial = /commercial|office/i.test(allRaw)
+  if (t === 'non-residential') return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial || !rawHasRetail }
   // Mixed-use / unknown: trust rawDataPoints
-  const hasRetail = /retail/i.test(oe2Raw)
-  const hasCommercial = /commercial|office/i.test(oe2Raw) // office = commercial
-  return { hasRetail, hasCommercial }
+  return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial }
 }
 
 /**
@@ -770,6 +781,7 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
     xml = deleteParagraphsByText(xml, [
       /^(?:\[XX\]|\d[\d,.]*)m2\s+retail$/i,
       /^\[total area retail\]$/i,
+      /^(?:\d+\s+)?retail\s+tenanci(?:es|y)$/i,
     ])
     xml = removePlaceholdersFromRuns(xml, [/\[total retail\]/gi, /\[total area retail\]/gi])
   }
@@ -777,6 +789,7 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
     xml = deleteParagraphsByText(xml, [
       /^(?:\[XX\]|\d[\d,.]*)m2\s+(?:commercial|office)$/i,
       /^\[total area office\]$/i,
+      /^(?:\d+\s+)?(?:commercial|office)\s+tenanci(?:es|y)$/i,
     ])
     xml = removePlaceholdersFromRuns(xml, [/\[total office\]/gi, /\[total area office\]/gi])
   }
@@ -1828,10 +1841,11 @@ async function fillWordTemplate(
     }
   }
 
-  // ── Ceiling fans % from IEQ rawDataPoints ────────────────────────────────
+  // ── Ceiling fans % from IEQ 3.5 rawDataPoints ───────────────────────────
   if (!namedValues['fans'] && !namedValues['Fans']) {
-    const ieqRaw = credits.filter(c => /^ieq/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
-    const fansNum = extractNumber(ieqRaw, [
+    const ieq35 = findCreditLike(credits, 'ieq 3.5')
+    const ieq35Raw = ieq35?.rawDataPoints ?? ''
+    const fansNum = extractNumber(ieq35Raw, [
       /(\d+(?:\.\d+)?)\s*%[^.\n]*ceiling\s*fan/i,
       /ceiling\s*fan[^.\n]*?:\s*(\d+(?:\.\d+)?)\s*%/i,
       /(\d+(?:\.\d+)?)\s*%[^.\n]*regular[- ]?use\s*areas?/i,
@@ -1839,7 +1853,7 @@ async function fillWordTemplate(
     if (fansNum !== null) {
       namedValues['fans'] = String(fansNum)
       namedValues['Fans'] = String(fansNum)
-      console.log('[report] Fans % from IEQ:', fansNum)
+      console.log('[report] Fans % from IEQ 3.5:', fansNum)
     }
   }
 
@@ -1913,6 +1927,19 @@ async function fillWordTemplate(
       namedValues['Motorbikes'] = '5'
       console.log('[report] motorbikes: 5 (Transport 2.3 achieved)')
     }
+  }
+
+  // Alias compound placeholder keys to the compact names used in the MixUse/Commercial templates.
+  // The Claude prompt uses descriptive keys like "natural ventilation% (XX out of XX)" but the
+  // templates use [naturalventilation%], [wintersunlight%], [orientation%].
+  const compactAliases: [string, string][] = [
+    ['natural ventilation% (XX out of XX)', 'naturalventilation%'],
+    ['winter sunlight% (XX out of XX)',     'wintersunlight%'],
+    ['orientation% (XX out of XX)',         'orientation%'],
+  ]
+  for (const [full, compact] of compactAliases) {
+    const val = namedValues[full] ?? namedValues[compact]
+    if (val) { namedValues[full] = val; namedValues[compact] = val }
   }
 
   const unwrapDocxtemplaterError = (err: unknown): never => {
@@ -2016,7 +2043,7 @@ async function fillWordTemplate(
 
   if (rowsToDelete.length > 0) {
     // These rows must always remain regardless of credit status
-    const NEVER_DELETE = /embodied\s*energy|structural.*steel|sustainable\s*timber|\bpvc\b|sustainable\s*products|building\s*re-?use|bicycle\s*parking|end\s*of\s*trip|motorbike|construction\s*and\s*demolition\s*waste/i
+    const NEVER_DELETE = /embodied\s*energy|structural.*steel|sustainable\s*timber|\bpvc\b|sustainable\s*products|building\s*re-?use|bicycle\s*parking|end\s*of\s*trip|motorbike|construction\s*and\s*demolition\s*waste|thermal\s*performance\s*rating.*non.resi/i
     const safeToDelete = rowsToDelete.filter(r => !NEVER_DELETE.test(r))
     if (safeToDelete.length > 0) {
       safeApply('deleteTableRows', () => {
@@ -2280,14 +2307,29 @@ async function fillWordTemplate(
 
     const iwm21 = findCreditLike(credits, 'iwm 2.1')
     if (iwm21?.commentsGIW?.trim()) {
-      const iwm21Text = filledGIWComments['iwm 2.1'] ?? iwm21.commentsGIW.trim()
+      const rawIwm21Text = filledGIWComments['iwm 2.1'] ?? iwm21.commentsGIW.trim()
+      // Pick the relevant option (same logic as namedValues extraction above)
+      let optionText = rawIwm21Text
+      const opt1M = rawIwm21Text.match(/option\s*1\s*[:\-\n]([\s\S]*?)(?=\n\s*option\s*[23]|$)/i)
+      if (opt1M) {
+        const revText = (iwm21.reviewerComments ?? []).join(' ').toLowerCase()
+        const opt2M = rawIwm21Text.match(/option\s*2\s*[:\-\n]([\s\S]*?)(?=\n\s*option\s*3|$)/i)
+        optionText = (opt2M && /option\s*2/i.test(revText)) ? opt2M[1].trim() : opt1M[1].trim()
+      }
+      // Extract only bullet-point lines from the selected option
+      const bulletLines = optionText.split('\n')
+        .map((l: string) => l.trim())
+        .filter((l: string) => /^[•\-*]/.test(l))
+        .map((l: string) => l.replace(/^[•\-*]\s*/, '').trim())
+      const iwm21Text = bulletLines.length > 0 ? bulletLines.join('\n') : optionText
+
       renderedXml = replaceThirdCellContent(renderedXml, /^Stormwater\s*Treatment$/i,
         iwm21Text,
         /Blue\s*Factor\s*rating.*achieved/i,
-        /Refer\s*WSUD/i)
+        /Refer\s*WSUD/i,
+        true)
 
       // ── WSUD appendix: replace Blue Factor bullet points with same GIW comment ──
-      // Delete the raingarden bullet first, then replace the tank bullet with the comment
       renderedXml = deleteParagraphsByText(renderedXml, [
         /rainwater.*collected from.*raingarden/i,
         /raingarden.*extended\s+detention/i,
