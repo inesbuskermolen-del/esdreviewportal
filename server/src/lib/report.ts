@@ -2419,7 +2419,7 @@ async function fillWordTemplate(
   })
 
   // ── Normalise "shop/shops" → "retail"/"retail tenancies" throughout ──────────
-  renderedXml = renderedXml.replace(/<w:t([^>]*)>([^<]*)<\/w:t>/g, (_m, attrs, text) => {
+  renderedXml = renderedXml.replace(/<w:t([^>]*)>([^<]*)<\/w:t>/g, (_m: string, attrs: string, text: string) => {
     const replaced = text
       .replace(/\bshops\b/g, 'retail tenancies')
       .replace(/\bShops\b/g, 'Retail tenancies')
@@ -2434,10 +2434,10 @@ async function fillWordTemplate(
   {
     const t23 = findCreditLike(credits, 'transport 2.3')
     if (/^(y|yes|achieved|targeted)$/i.test(t23?.creditStatus ?? '')) {
-      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
-        const combined = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m => m[1]).join('')
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
+        const combined = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m: RegExpMatchArray) => m[1]).join('')
         if (!/motorbike|moped/i.test(combined)) return para
-        let result = para.replace(/<w:r(\s[^>]*)?>(?=[\s\S]*?<\/w:r>)/g, (match) => {
+        let result = para.replace(/<w:r(\s[^>]*)?>(?=[\s\S]*?<\/w:r>)/g, (match: string) => {
           if (match.includes('<w:rPr>')) return match
           return match.replace(/^(<w:r[^>]*>)/, '$1<w:rPr><w:highlight w:val="yellow"/></w:rPr>')
         })
