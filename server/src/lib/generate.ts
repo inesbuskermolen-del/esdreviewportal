@@ -374,12 +374,19 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     // IEQ 1.1 / IEQ 1.2: deterministically fill the daylight percentage
     // The template [XX]% means the % of living areas / bedrooms that comply, NOT the credit score.
     // BESS scores 66% when 80% of areas pass, 100% when all pass — Claude can't infer this.
+    // Three pathways: DtS | Built-in calculator | Own calculations (modelling)
     if (/^ieq\s+1\.[12]$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       const raw = credit.rawDataPoints ?? ''
       const isLiving = /^ieq\s+1\.1/i.test(credit.creditId.trim())
+      const areaLabel = isLiving ? 'living areas' : 'bedrooms'
 
-      // Check for DtS pathway — use the fixed comment, no percentage needed
-      if (/\bdts\b|deemed.to.satisfy|daylight.*dts|dts.*path/i.test(raw)) {
+      // Pathway detection (mirrors report.ts applyBESSFallbacks logic)
+      const usedDtS      = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(raw) || /\bdts\b|dts.*path/i.test(raw)
+      const usedBuiltIn  = /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(raw)
+      const usedModelling = /calculation\s+approach[^:\n]*\?:\s*provide\s+your\s+own\s+calculations/i.test(raw)
+
+      // DtS pathway — fixed comment, no percentage needed
+      if (usedDtS) {
         await prisma.credit.update({
           where: { id: credit.id },
           data: { commentsGIW: 'The daylight DtS pathway has been applied to demonstrate daylight compliance.' },
@@ -387,7 +394,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         continue
       }
 
-      // Try to extract actual % from rawDataPoints (e.g. "85% of living areas comply")
+      // Extract compliance % from rawDataPoints
       const rawPctMatch = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:living|bedroom|habitable|area|space|comply|achieve)/i)
         ?? raw.match(/(?:living|bedroom|habitable|area|space)[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i)
       let areaPct: string | null = rawPctMatch ? rawPctMatch[1] : null
@@ -401,8 +408,14 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       }
 
       if (areaPct) {
-        const areaLabel = isLiving ? 'living areas' : 'bedrooms'
-        const comment = `The BESS built in daylight calculator has been applied to demonstrate compliance. ${areaPct}% of the ${areaLabel} achieve the BESS best practice daylight requirements.`
+        let comment: string
+        if (usedModelling) {
+          // Own calculations / daylight modelling pathway
+          comment = `${areaPct}% of the ${areaLabel} achieves the BESS best practice requirements.`
+        } else {
+          // Built-in calculator pathway (default when pathway not explicitly detected)
+          comment = `The BESS built in daylight calculator has been applied to demonstrate compliance. ${areaPct}% of the ${areaLabel} achieve the BESS best practice daylight requirements.`
+        }
         await prisma.credit.update({
           where: { id: credit.id },
           data: { commentsGIW: comment },
@@ -425,7 +438,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
-    // Transport 1.1: extract residential bicycle count directly from rawDataPoints
+    // Transport 1.1: extract residential bicycle count — show comment even if not achieved
     if (/^transport\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       const raw = credit.rawDataPoints ?? ''
       const countMatch =
@@ -434,10 +447,30 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
         raw.match(/how many[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
         raw.match(/(\d+)\s*resident(?:ial)?\s+bicycle/i)
-      if (countMatch) {
+      const count = countMatch ? parseInt(countMatch[1], 10) : 0
+      if (count > 0) {
         await prisma.credit.update({
           where: { id: credit.id },
-          data: { commentsGIW: `${countMatch[1]} secure bicycle spaces for residents.` },
+          data: { commentsGIW: `${count} secure bicycle spaces for residents.` },
+        })
+        continue
+      }
+    }
+
+    // Transport 1.2: extract residential visitor bicycle count — show comment even if not achieved
+    if (/^transport\s+1\.2$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const countMatch =
+        raw.match(/(\d+)\s*residential\s+visitor\s+bicycle/i) ??
+        raw.match(/(\d+)\s*visitor\s+bicycle[^.\n]*?resident/i) ??
+        raw.match(/residential\s+visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/how many[^?]*visitor[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*short[- ]?stay\s+bicycle/i)
+      const count = countMatch ? parseInt(countMatch[1], 10) : 0
+      if (count > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${count} bicycle spaces for residential visitors.` },
         })
         continue
       }
@@ -813,6 +846,21 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
       creditStatus: { notIn: ['N', 'ScopedOut'] },
       hiddenFromPortal: true,
       NOT: { category: { contains: 'innovation', mode: 'insensitive' } },
+    },
+    data: { hiddenFromPortal: false },
+  })
+
+  // Transport 1.1 and 1.2: always show in the reviewer portal when bicycle counts > 0,
+  // even if the credit is not achieved (the comment was filled above only when count > 0)
+  await prisma.credit.updateMany({
+    where: {
+      projectId,
+      deletedByGIW: false,
+      OR: [
+        { creditId: { equals: 'Transport 1.1', mode: 'insensitive' } },
+        { creditId: { equals: 'Transport 1.2', mode: 'insensitive' } },
+      ],
+      commentsGIW: { not: null },
     },
     data: { hiddenFromPortal: false },
   })
