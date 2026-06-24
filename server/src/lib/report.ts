@@ -20,8 +20,8 @@ async function getPostcodeClimateZoneMap(): Promise<Map<number, number>> {
   const map = new Map<number, number>()
   ws.eachRow((row, rowNum) => {
     if (rowNum < 3) return // skip header rows
-    const postcode = Number(row.getCell(1).value)
-    const zone = Number(row.getCell(2).value)
+    const postcode = Number(row.getCell(2).value)
+    const zone = Number(row.getCell(3).value)
     if (!isNaN(postcode) && !isNaN(zone) && zone > 0) map.set(postcode, zone)
   })
   _postcodeClimateZoneCache = map
@@ -38,7 +38,7 @@ function extractPostcode(address: string | null): number | null {
 const BADS_COOLING_LOAD: Record<number, string> = {
   21: '30 MJ/m2',
   60: '22MJ/m2',
-  62: '21MJ/M2',
+  62: '21MJ/m2',
 }
 
 const WORD_TEMPLATES: Record<string, string> = {
@@ -430,7 +430,7 @@ ${giwXXCredits.map(c => `    "${c.creditId}": "<fill all [XX] in the GIW comment
     "shower WELS": "<shower WELS star rating from IWM 1.1 or null>",
     "Shower WELS": "<same as shower WELS>",
     "Dishwasher WELS": "<dishwasher WELS star rating from IWM 1.1 or null>",
-    "Average star rating": "<average WELS star rating from IWM 1.1, e.g. '4.0', or null>",
+    "Average star rating": "<average NatHERS star rating from OE 1.2 rawDataPoints, e.g. '6.5', or null>",
     "improvement%": "<thermal performance improvement % above minimum from OE 1.x e.g. '15%', or null>",
     "Hot water": "<hot water system description e.g. 'a heat pump hot water system' from OE 3.x, or null>",
     "solar PV": "<solar PV system size as 'X kW' from OE 4.x, or null>",
@@ -465,7 +465,7 @@ ${giwXXCredits.map(c => `    "${c.creditId}": "<fill all [XX] in the GIW comment
     "food production area": "<food production garden area m² (number only) from Urban Ecology rawDataPoints, or null>",
     "Food production": "<same as food production area>",
     "Blue Factor score": "<Blue Factor stormwater quality score from IWM 2.1 rawDataPoints or GIW comments, or null>",
-    "collection area": "<rainwater catchment/collection area m² from IWM 2.1 rawDataPoints or GIW comments, or null>",
+    "collection area": "<total roof area connected to the rainwater tank (m²) from IWM rawDataPoints rainwater tank profile question, or null>",
     "raingarden size": "<rain garden area m² from IWM 2.1 rawDataPoints or GIW comments, or null>",
     "raingarden area": "<same as raingarden size>",
     "tap WELS": "<same as taps WELS — tap WELS star rating from IWM 1.1 or null>",
@@ -765,20 +765,16 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
   if (!hasRetail) {
     xml = deleteParagraphsByText(xml, [
       /^(?:\[XX\]|\d[\d,.]*)m2\s+retail$/i,
-      /\[total retail\]/i,
-      /\[Total Retail\]/i,
-      /\[total area retail\]/i,
-      /\[Total area retail\]/i,
+      /^\[total area retail\]$/i,
     ])
+    xml = removePlaceholdersFromRuns(xml, [/\[total retail\]/gi, /\[total area retail\]/gi])
   }
   if (!hasCommercial) {
     xml = deleteParagraphsByText(xml, [
       /^(?:\[XX\]|\d[\d,.]*)m2\s+(?:commercial|office)$/i,
-      /\[total office\]/i,
-      /\[Total Office\]/i,
-      /\[total area office\]/i,
-      /\[Total area office\]/i,
+      /^\[total area office\]$/i,
     ])
+    xml = removePlaceholdersFromRuns(xml, [/\[total office\]/gi, /\[total area office\]/gi])
   }
 
   // ── Internal Lighting – Non-Residential: remove inapplicable bullet lines ─
@@ -894,14 +890,18 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
     }
   }
 
-  // ── OE 2.6: delete gas metering sentence for commercial tenancy when targeted ─
+  // ── OE 2.6: delete gas metering sentence when electrification credit is achieved ─
   {
     const oe26 = findCreditLike(credits, 'oe 2.6')
-    if (/^(y|yes|achieved|targeted)$/i.test(oe26?.creditStatus ?? '')) {
+    const oe26Status = oe26?.creditStatus ?? ''
+    if (/^(y|yes|achieved|targeted)$/i.test(oe26Status)) {
       xml = deleteParagraphsByText(xml, [
         /gas metering is to be provided to the commercial tenancy/i,
         /gas metering is to be provided to each individual tenancy requiring a gas connection/i,
       ])
+    }
+    if (/^disabled$/i.test(oe26Status)) {
+      xml = deleteTableRows(xml, ['Electrification'])
     }
   }
 
@@ -1071,6 +1071,14 @@ function deleteSectionByHeading(xml: string, headingPattern: RegExp): string {
 /**
  * Remove paragraphs whose full text matches any of the given patterns.
  */
+function removePlaceholdersFromRuns(xml: string, patterns: RegExp[]): string {
+  return xml.replace(/<w:t([^>]*)>([^<]*)<\/w:t>/g, (_match, attrs, text) => {
+    let result = text
+    for (const p of patterns) result = result.replace(p, '')
+    return `<w:t${attrs}>${result}</w:t>`
+  })
+}
+
 function deleteParagraphsByText(xml: string, patterns: RegExp[]): string {
   return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
     const texts: string[] = []
@@ -1712,6 +1720,16 @@ async function fillWordTemplate(
           console.log('[report] Collection area from IWM 2.1:', m[1])
         }
       }
+      // Fallback: search all IWM credits for the rainwater tank roof area BESS question
+      if (!namedValues['collection area']) {
+        const iwmRaw = credits.filter(c => /^iwm/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+        const m = iwmRaw.match(/total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\??\s*:\s*([\d,]+)/i) ??
+                  iwmRaw.match(/roof\s+area\s+connected[^:\n]*:\s*([\d,]+)/i)
+        if (m) {
+          namedValues['collection area'] = m[1].replace(/,/g, '')
+          console.log('[report] Collection area from rainwater tank profile:', m[1])
+        }
+      }
       if (!namedValues['raingarden size'] && !namedValues['raingarden area']) {
         const m = workingText.match(/rain\s*garden[^:\n]*:\s*([\d,]+)/i) ??
                   workingText.match(/([\d,]+)\s*m[²2]\s*rain\s*garden/i)
@@ -1721,6 +1739,23 @@ async function fillWordTemplate(
           namedValues['raingarden area'] = val
           console.log('[report] Raingarden size from IWM 2.1:', val)
         }
+      }
+    }
+  }
+
+  // ── OE 1.2: average NatHERS star rating fallback ─────────────────────────
+  if (!namedValues['Average star rating']) {
+    const oe12 = findCredit(credits, 'oe 1.2')
+    const oe12Raw = oe12?.rawDataPoints ?? ''
+    if (oe12Raw) {
+      const stars = extractNumber(oe12Raw, [
+        /star\s*rating[^:]*:\s*(\d+\.?\d*)/i,
+        /average[^:]*:\s*(\d+\.?\d*)/i,
+        /(\d+\.?\d*)\s*star/i,
+      ])
+      if (stars != null) {
+        namedValues['Average star rating'] = String(stars)
+        console.log('[report] Average star rating from OE 1.2:', stars)
       }
     }
   }
@@ -1824,6 +1859,15 @@ async function fillWordTemplate(
         /moped[^.\n]*?:\s*(\d+)/i,
       ])
       if (moto !== null) { set(['motorbikes', 'Motorbikes'], moto); console.log('[report] motorbikes:', moto) }
+
+      // Transport 2.3 only reports achieved/not achieved — hardcode 5 spaces when achieved
+      if (moto === null) {
+        const t23 = findCreditLike(credits, 'transport 2.3')
+        if (/^(y|yes|achieved|targeted)$/i.test(t23?.creditStatus ?? '')) {
+          set(['motorbikes', 'Motorbikes'], 5)
+          console.log('[report] motorbikes: 5 (Transport 2.3 achieved)')
+        }
+      }
     }
   }
 
@@ -2173,7 +2217,7 @@ async function fillWordTemplate(
     const iwm21 = findCreditLike(credits, 'iwm 2.1')
     if (iwm21?.commentsGIW?.trim())
       renderedXml = replaceThirdCellContent(renderedXml, /^Stormwater\s*Treatment$/i,
-        filledGIWComments['iwm 2.1'] ?? iwm21.commentsGIW.trim(), /Refer\s*WSUD/i)
+        filledGIWComments['iwm 2.1'] ?? iwm21.commentsGIW.trim(), /Refer\s*WSUD|Blue\s*Factor\s*rating.*achieved/i)
 
     const shadingCredit = findCreditLike(credits, 'ieq 3.2') ?? findCreditLike(credits, 'ieq 3.4')
     if (shadingCredit?.commentsGIW?.trim()) {
@@ -2273,9 +2317,8 @@ async function fillWordTemplate(
       }
     } else {
       renderedXml = deleteParagraphsByText(renderedXml, [
-        /all exposed floors and ceilings.*envelope.*insulation/i,
-        /all wall and glazing.*facade calculator/i,
-        /refer\s+appendix.*j4d6/i,
+        /all exposed floors and ceilings.*envelope/i,
+        /all wall and glazing.*ncc2022/i,
       ])
     }
   }
@@ -2374,6 +2417,35 @@ async function fillWordTemplate(
     if (!changes.length) return para
     return applyParaChanges(para, changes)
   })
+
+  // ── Normalise "shop/shops" → "retail"/"retail tenancies" throughout ──────────
+  renderedXml = renderedXml.replace(/<w:t([^>]*)>([^<]*)<\/w:t>/g, (_m, attrs, text) => {
+    const replaced = text
+      .replace(/\bshops\b/g, 'retail tenancies')
+      .replace(/\bShops\b/g, 'Retail tenancies')
+      .replace(/\bSHOPS\b/g, 'RETAIL TENANCIES')
+      .replace(/\bshop\b/g, 'retail')
+      .replace(/\bShop\b/g, 'Retail')
+      .replace(/\bSHOP\b/g, 'RETAIL')
+    return `<w:t${attrs}>${replaced}</w:t>`
+  })
+
+  // ── Highlight motorbike/moped rows when count was hardcoded (needs manual review) ──
+  {
+    const t23 = findCreditLike(credits, 'transport 2.3')
+    if (/^(y|yes|achieved|targeted)$/i.test(t23?.creditStatus ?? '')) {
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+        const combined = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m => m[1]).join('')
+        if (!/motorbike|moped/i.test(combined)) return para
+        let result = para.replace(/<w:r(\s[^>]*)?>(?=[\s\S]*?<\/w:r>)/g, (match) => {
+          if (match.includes('<w:rPr>')) return match
+          return match.replace(/^(<w:r[^>]*>)/, '$1<w:rPr><w:highlight w:val="yellow"/></w:rPr>')
+        })
+        result = result.replace(/(<w:rPr>)(?![\s\S]*?<w:highlight )/g, '$1<w:highlight w:val="yellow"/>')
+        return result
+      })
+    }
+  }
 
   // ── BESS rawDataPoints fallbacks (catches any unfilled placeholders) ──────
   safeApply('applyBESSFallbacks', () => applyBESSFallbacks(renderedXml, credits, project))

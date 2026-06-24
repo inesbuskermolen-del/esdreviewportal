@@ -414,6 +414,24 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
+    // Transport 1.1: extract residential bicycle count directly from rawDataPoints
+    if (/^transport\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const countMatch =
+        raw.match(/(\d+)\s*(?:secure\s+)?(?:resident(?:ial)?\s+)?bicycle\s+spaces?\s+(?:for\s+)?residents/i) ??
+        raw.match(/resident(?:ial)?\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
+        raw.match(/how many[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*resident(?:ial)?\s+bicycle/i)
+      if (countMatch) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${countMatch[1]} secure bicycle spaces for residents.` },
+        })
+        continue
+      }
+    }
+
     const templates = findTemplates(credit.creditId)
 
     if (templates.length > 0) {
