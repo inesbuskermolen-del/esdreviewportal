@@ -1417,16 +1417,29 @@ function findSheetXmlPath(zip: PizZip, sheetName: string): string {
 function patchCell(wsXml: string, cellRef: string, value: string | number): string {
   const r = cellRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   if (typeof value === 'number') {
-    // Replace existing cell value, stripping type attr so Excel treats it as numeric
-    return wsXml.replace(
+    // Try cells that already have a numeric/formula value
+    let result = wsXml.replace(
       new RegExp(`<c r="${r}"([^>]*)>(?:<f>[^<]*</f>)?<v>[^<]*</v></c>`),
+      (_, attrs) => `<c r="${r}"${attrs.replace(/ t="[^"]*"/, '')}><v>${value}</v></c>`,
+    )
+    if (result !== wsXml) return result
+    // Fall back to self-closing empty cells (most template input cells are empty)
+    return wsXml.replace(
+      new RegExp(`<c r="${r}"([^>]*)/>`),
       (_, attrs) => `<c r="${r}"${attrs.replace(/ t="[^"]*"/, '')}><v>${value}</v></c>`,
     )
   }
   const esc = String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // Try cells that already have string/formula content
+  let result = wsXml.replace(
+    new RegExp(`<c r="${r}"([^>]*)>(?:<f>[^<]*</f>)?(?:<v>[^<]*</v>|<is>[\s\S]*?<\/is>)</c>`),
+    (_, attrs) => `<c r="${r}"${attrs.replace(/ t="[^"]*"/, '')} t="inlineStr"><is><t xml:space="preserve">${esc}</t></is></c>`,
+  )
+  if (result !== wsXml) return result
+  // Fall back to self-closing empty cells (most template input cells are empty)
   return wsXml.replace(
-    new RegExp(`<c r="${r}"[^>]*>(?:<f>[^<]*</f>)?(?:<v>[^<]*</v>|<is>[\s\S]*?<\/is>)</c>`),
-    `<c r="${r}" t="inlineStr"><is><t xml:space="preserve">${esc}</t></is></c>`,
+    new RegExp(`<c r="${r}"([^>]*)/>`),
+    (_, attrs) => `<c r="${r}"${attrs.replace(/ t="[^"]*"/, '')} t="inlineStr"><is><t xml:space="preserve">${esc}</t></is></c>`,
   )
 }
 
