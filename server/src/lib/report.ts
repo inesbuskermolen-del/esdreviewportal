@@ -1180,7 +1180,7 @@ function buildTableRow(templateRowXml: string, col1Text: string, col2Text: strin
  */
 function insertInnovationRows(xml: string, credits: ReportCreditData[]): string {
   const innovationCredits = credits
-    .filter(c => /^innovation/i.test(c.category ?? '') || /^innovation/i.test(c.creditId))
+    .filter(c => /^inn(?:ovation)?/i.test(c.category ?? '') || /^inn(?:ovation)?/i.test(c.creditId))
     .filter(c => c.rawDataPoints?.trim())
 
   if (!innovationCredits.length) return xml
@@ -1962,7 +1962,7 @@ async function fillWordTemplate(
   // Must run before deleteTableRows — Claude's rowsToDelete may include template
   // Innovation criteria names, which would remove the templateRow needed to build new rows.
   try {
-    const innovCredit = credits.find(c => /^innovation\s*1\.1/i.test(c.creditId))
+    const innovCredit = credits.find(c => /^inn(?:ovation)?\s*1\.1/i.test(c.creditId))
     const bessPoints = innovCredit?.rawDataPoints ? parseInnovationPoints(innovCredit.rawDataPoints) : []
     if (bessPoints.length > 0) {
       renderedXml = syncInnovationTable(renderedXml, bessPoints)
