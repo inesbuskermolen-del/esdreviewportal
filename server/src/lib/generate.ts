@@ -956,6 +956,34 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
     },
     data: { hiddenFromPortal: false },
   })
+
+  // OE 4.2: ensure it always exists in the admin matrix (may have been excluded during PDF
+  // parsing when BESS marked it as Disabled). Seed with N status if missing.
+  const oe42Exists = await prisma.credit.findFirst({
+    where: { projectId, creditId: { equals: 'OE 4.2', mode: 'insensitive' }, deletedByGIW: false },
+    select: { id: true },
+  })
+  if (!oe42Exists) {
+    // Derive category string from existing OE credits so it matches the project's naming
+    const oeCredit = await prisma.credit.findFirst({
+      where: { projectId, creditId: { startsWith: 'OE', mode: 'insensitive' }, deletedByGIW: false },
+      select: { category: true },
+    })
+    await prisma.credit.create({
+      data: {
+        projectId,
+        creditId: 'OE 4.2',
+        creditName: 'On-site Renewable Energy',
+        category: oeCredit?.category ?? 'Operational Energy',
+        categoryOrder: 3,
+        creditStatus: 'N',
+        creditScore: 0,
+        mandatory: false,
+        responsibleParty: 'Developer / Architect / Services',
+        hiddenFromPortal: true,
+      },
+    })
+  }
 }
 
 export async function triggerCommentGeneration(projectId: string): Promise<void> {
