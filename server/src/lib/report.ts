@@ -580,7 +580,7 @@ function formatBESSPercentage(raw: string, totalApts: number | null): string | n
   const pct = raw.match(/(\d+(?:\.\d+)?)\s*%/)
   if (outOf) {
     const n = outOf[1], tot = outOf[2]
-    const p = pct?.[1] ?? Math.round(parseInt(n) / parseInt(tot) * 100).toString()
+    const p = Math.round(parseInt(n) / parseInt(tot) * 100).toString()
     return `${p}% (${n} out of ${tot})`
   }
   if (pct && totalApts) {
@@ -757,16 +757,21 @@ function replaceThirdCellContent(
  * Falls back to typology when rawDataPoints don't mention them.
  */
 function detectNonResidential(credits: ReportCreditData[], typology: string | null): { hasRetail: boolean; hasCommercial: boolean } {
-  // Search all credits' rawDataPoints, not just OE 2.x — BESS data may use any credit to describe the mix
-  const allRaw = credits.map(c => c.rawDataPoints ?? '').join(' ')
   const t = (typology ?? '').toLowerCase()
   // Pure residential — never has retail/commercial
-  if (t === 'multi-residential' || t === 'townhouse') return { hasRetail: false, hasCommercial: false }
-  // Retail includes "shop/shops" since BESS PDFs may use that terminology
-  const rawHasRetail = /retail|shop/i.test(allRaw)
-  const rawHasCommercial = /office/i.test(allRaw)
+  if (t === 'multi-residential' || t === 'townhouse') {
+    console.log('[report] detectNonResidential: pure residential typology → no retail/commercial')
+    return { hasRetail: false, hasCommercial: false }
+  }
+  // Use OE 2.x first (dwelling mix profile), fall back to all credits
+  const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+  const searchRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
+  // Use specific area/tenancy patterns to avoid false positives from "home office", transport data, etc.
+  const rawHasRetail = /retail\s+(?:tenanci|area|floor|space|m2|sqm)|(?:tenanci|area|floor|space|m2|sqm)[^.\n]*retail|\bretail\s+\d|\d[^.\n]*\bretail\b/i.test(searchRaw)
+  const rawHasCommercial = /(?:commercial|office)\s+(?:tenanci|area|floor|space|m2|sqm)|(?:tenanci|area|floor|space|m2|sqm)[^.\n]*(?:commercial|office)|\bcommercial\s+\d|\d[^.\n]*\b(?:commercial)\b/i.test(searchRaw)
+  console.log('[report] detectNonResidential: typology=', t, 'hasRetail=', rawHasRetail, 'hasCommercial=', rawHasCommercial)
+  console.log('[report] detectNonResidential: OE2 raw (first 300):', oe2Raw.slice(0, 300))
   if (t === 'non-residential') return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial || !rawHasRetail }
-  // Mixed-use / unknown: trust rawDataPoints
   return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial }
 }
 
@@ -2604,6 +2609,17 @@ async function fillWordTemplate(
 
   // ── Retail / commercial line items ────────────────────────────────────────
   const { hasRetail, hasCommercial } = detectNonResidential(credits, project.typology ?? null)
+  if (!hasRetail || !hasCommercial) {
+    // Log the combined text of paragraphs containing retail/commercial keywords so we can verify pattern matching
+    const paraTexts: string[] = []
+    renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
+      const t = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m => m[1]).join('').trim()
+      if (/retail|commercial|office|tenanci/i.test(t)) paraTexts.push(t)
+      return para
+    })
+    console.log('[report] removeNonResidentialLines: hasRetail=', hasRetail, 'hasCommercial=', hasCommercial)
+    console.log('[report] Candidate paragraphs:', paraTexts.slice(0, 20))
+  }
   safeApply('removeNonResidentialLines', () => removeNonResidentialLines(renderedXml, hasRetail, hasCommercial))
 
   // ── WELS star rating: strip [N] brackets left by Docxtemplater nullGetter ──

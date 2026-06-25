@@ -257,6 +257,33 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     // Innovation umbrella credits are split into line items by generateInnovationLineItems — skip here
     if (credit.category.toLowerCase().includes('innovation')) continue
 
+    // OE 4.2 / OE 4.5: extract solar PV regardless of credit status.
+    // If a PV system is entered it must appear in the GIW comment even when not achieved / scoped out.
+    if (/^oe\s+4\.[25]$/i.test(credit.creditId.trim())) {
+      const raw = credit.rawDataPoints ?? ''
+      const kwMatch =
+        raw.match(/system\s+size[^:\n]*:\s*([\d.]+)\s*k[wW]?[ph]?/i) ??
+        raw.match(/solar\s+photovoltaic[^:\n]*\n[^\n]*system\s+size[^:\n]*:\s*([\d.]+)/i) ??
+        raw.match(/total\s+(?:size|capacity)[^:\n]*:\s*([\d.]+)\s*k[wW]/i) ??
+        raw.match(/([\d.]+)\s*k[wW][ph]?\s+solar/i) ??
+        raw.match(/solar[^:\n]*:\s*([\d.]+)\s*k[wW]/i)
+      const kw = kwMatch ? kwMatch[1] : null
+      if (kw) {
+        const orientMatch =
+          raw.match(/orientation[^:\n]*:\s*([^\n,;.]+)/i) ??
+          raw.match(/facing\s+(?:due\s+)?([A-Za-z/ -]+)/i)
+        const tiltMatch =
+          raw.match(/(?:tilt|inclination|angle)[^:\n]*:\s*([\d.]+)\s*°?/i) ??
+          raw.match(/([\d.]+)\s*°\s*(?:tilt|inclination)/i)
+        const orientation = orientMatch ? orientMatch[1].trim() : '[XX]'
+        const tilt = tiltMatch ? `${tiltMatch[1]}°` : '[XX]'
+        const comment = `A total ${kw}kW solar PV system is to be installed at roof. The system is to be installed facing due ${orientation} at a ${tilt} inclination.`
+        await prisma.credit.update({ where: { id: credit.id }, data: { commentsGIW: comment } })
+        continue
+      }
+      // No PV data found — fall through to "Not targeted." / scoped-out handling below
+    }
+
     // Not achieved with zero score = not targeted; skip AI generation
     if (credit.creditStatus === 'N' && credit.creditScore === 0) {
       await prisma.credit.update({
@@ -432,34 +459,6 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         continue
       }
       // If we still can't determine the percentage, fall through to AI with an enriched prompt
-    }
-
-    // OE 4.2 / OE 4.5: extract solar PV capacity from Solar Photovoltaic system profile → System Size
-    if (/^oe\s+4\.[25]$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
-      const raw = credit.rawDataPoints ?? ''
-      const kwMatch =
-        raw.match(/system\s+size[^:\n]*:\s*([\d.]+)\s*k[wW]?[ph]?/i) ??
-        raw.match(/solar\s+photovoltaic[^:\n]*\n[^\n]*system\s+size[^:\n]*:\s*([\d.]+)/i) ??
-        raw.match(/total\s+(?:size|capacity)[^:\n]*:\s*([\d.]+)\s*k[wW]/i) ??
-        raw.match(/([\d.]+)\s*k[wW][ph]?\s+solar/i) ??
-        raw.match(/solar[^:\n]*:\s*([\d.]+)\s*k[wW]/i)
-      const kw = kwMatch ? kwMatch[1] : null
-
-      if (kw) {
-        const orientMatch =
-          raw.match(/orientation[^:\n]*:\s*([^\n,;.]+)/i) ??
-          raw.match(/facing\s+(?:due\s+)?([A-Za-z/ -]+)/i)
-        const tiltMatch =
-          raw.match(/(?:tilt|inclination|angle)[^:\n]*:\s*([\d.]+)\s*°?/i) ??
-          raw.match(/([\d.]+)\s*°\s*(?:tilt|inclination)/i)
-
-        const orientation = orientMatch ? orientMatch[1].trim() : '[XX]'
-        const tilt = tiltMatch ? `${tiltMatch[1]}°` : '[XX]'
-
-        const comment = `A total ${kw}kW solar PV system is to be installed at roof. The system is to be installed facing due ${orientation} at a ${tilt} inclination.`
-        await prisma.credit.update({ where: { id: credit.id }, data: { commentsGIW: comment } })
-        continue
-      }
     }
 
     // IEQ 1.5 / 1.6 scoped-out: hide from admin panel (leave comment null so soft-delete fires)
