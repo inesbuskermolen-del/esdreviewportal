@@ -698,7 +698,7 @@ Score thresholds (include only if relevant):
 - OE 1.2 NatHERS Apartments: 50% credit score at 7.5 stars average, 75% at 8.0 stars, 100% at 8.5 stars average
 - OE 2.1 GHG emissions: continuous — score increases per % improvement, max at 20% reduction
 - OE 2.7 Energy consumption: continuous — score increases per % improvement, max at 20% reduction
-- OE 4.2 Solar Apartments: minimum 5% of apartment energy met by solar
+- OE 4.2 Solar Apartments: 100% credit score when a solar PV system provides ≥5% of total apartment energy — if the credit is currently not targeted or disabled, describe installing a solar PV system to achieve 100% score
 - OE 4.5 Solar Townhouses: min 30% for any points, 100% for maximum
 - IEQ 1.1 Daylight Living: 66% credit score when 80% of areas pass, 100% when 100% pass
 - IEQ 1.2 Daylight Bedrooms: 66% credit score when 80% of bedrooms pass, 100% when 100% pass
@@ -738,7 +738,7 @@ ${/^iwm\s*1\.1$/i.test(credit.creditId.trim())
             creditId: credit.id,
             creditReference: credit.creditId,
             creditName: credit.creditName,
-            currentScore: credit.creditScore,
+            currentScore: (credit.creditStatus === 'N' && (credit.creditScore === 0 || credit.creditScore == null)) ? null : credit.creditScore,
             improvementDescription: description,
           },
         })
