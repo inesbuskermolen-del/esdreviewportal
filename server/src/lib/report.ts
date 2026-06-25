@@ -2378,7 +2378,10 @@ async function fillWordTemplate(
       .join('\n')
     // Parse table rows: "Question?:    Answer" — check the answer side, not just presence of keywords
     const usedDTS     = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(daylightRaw)
-    const usedBuiltIn = /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(daylightRaw)
+    const usedBuiltIn =
+      /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(daylightRaw) ||
+      /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(daylightRaw) ||
+      /use\s+the\s+(?:bess\s+)?built[- ]?in\s+calculation/i.test(daylightRaw)
 
     // Delete DTS body paragraphs when modelling or built-in calculator was used
     if (!usedDTS) {

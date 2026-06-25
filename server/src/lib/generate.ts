@@ -380,10 +380,19 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       const isLiving = /^ieq\s+1\.1/i.test(credit.creditId.trim())
       const areaLabel = isLiving ? 'living areas' : 'bedrooms'
 
-      // Pathway detection (mirrors report.ts applyBESSFallbacks logic)
-      const usedDtS      = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(raw) || /\bdts\b|dts.*path/i.test(raw)
-      const usedBuiltIn  = /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(raw)
-      const usedModelling = /calculation\s+approach[^:\n]*\?:\s*provide\s+your\s+own\s+calculations/i.test(raw)
+      // Pathway detection (mirrors report.ts logic)
+      const usedDtS = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(raw) || /\bdts\b|dts.*path/i.test(raw)
+      const usedBuiltIn =
+        /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(raw) ||
+        /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(raw) ||
+        /use\s+the\s+(?:bess\s+)?built[- ]?in\s+calculation/i.test(raw)
+      const usedModelling =
+        /calculation\s+approach[^:\n]*\?:\s*provide\s+(?:your|our)\s+own\s+calculations/i.test(raw) ||
+        /approach[^:\n]*daylight[^:\n]*\?:\s*provide\s+(?:your|our)\s+own\s+calculations/i.test(raw) ||
+        /provide\s+(?:your|our)\s+own\s+(?:daylight\s+)?calculations/i.test(raw) ||
+        /daylight\s+modell(?:ing|ed)/i.test(raw) ||
+        /own\s+(?:daylight\s+)?calculations?\s+(?:have\s+been|provided|submitted|uploaded)/i.test(raw) ||
+        /(?:modell(?:ing|ed)|simulation)\s+(?:has\s+been\s+)?(?:provided|submitted|undertaken|used)/i.test(raw)
 
       // DtS pathway — fixed comment, no percentage needed
       if (usedDtS) {
@@ -409,11 +418,11 @@ export async function generateGIWComments(projectId: string): Promise<void> {
 
       if (areaPct) {
         let comment: string
-        if (usedModelling) {
+        if (usedModelling && !usedBuiltIn) {
           // Own calculations / daylight modelling pathway
           comment = `${areaPct}% of the ${areaLabel} achieves the BESS best practice requirements.`
         } else {
-          // Built-in calculator pathway (default when pathway not explicitly detected)
+          // Built-in calculator pathway (explicit or default when pathway not detected)
           comment = `The BESS built in daylight calculator has been applied to demonstrate compliance. ${areaPct}% of the ${areaLabel} achieve the BESS best practice daylight requirements.`
         }
         await prisma.credit.update({
