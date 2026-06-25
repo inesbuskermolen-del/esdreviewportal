@@ -59,6 +59,7 @@ const EXCEL_TEMPLATES: Record<string, string> = {
 export interface ReportProjectData {
   name: string
   address: string | null
+  rawAddress?: string | null
   projectId: string | null
   date: Date | null
   revision: string | null
@@ -763,7 +764,7 @@ function detectNonResidential(credits: ReportCreditData[], typology: string | nu
   if (t === 'multi-residential' || t === 'townhouse') return { hasRetail: false, hasCommercial: false }
   // Retail includes "shop/shops" since BESS PDFs may use that terminology
   const rawHasRetail = /retail|shop/i.test(allRaw)
-  const rawHasCommercial = /commercial|office/i.test(allRaw)
+  const rawHasCommercial = /office/i.test(allRaw)
   if (t === 'non-residential') return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial || !rawHasRetail }
   // Mixed-use / unknown: trust rawDataPoints
   return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial }
@@ -1984,6 +1985,8 @@ async function fillWordTemplate(
 
   try {
     doc!.render({
+      // Spread namedValues first so explicit keys below take precedence
+      ...Object.fromEntries(Object.entries(namedValues).filter(([, v]) => v != null && v !== '')),
       GIWREF: data.giwref,
       'Project Address': data.projectAddress,
       Client: data.client,
@@ -2170,7 +2173,7 @@ async function fillWordTemplate(
   // ── BADS cooling load dropdown ────────────────────────────────────────────
   {
     const postcodeClimateZones = await getPostcodeClimateZoneMap()
-    const postcode = extractPostcode(project.address)
+    const postcode = extractPostcode(project.rawAddress ?? project.address)
     const climateZone = postcode != null ? postcodeClimateZones.get(postcode) : undefined
     const badsItem = climateZone != null ? BADS_COOLING_LOAD[climateZone] : undefined
     if (badsItem != null) {
@@ -2321,7 +2324,7 @@ async function fillWordTemplate(
         .map((l: string) => l.trim())
         .filter((l: string) => /^[•\-*]/.test(l))
         .map((l: string) => l.replace(/^[•\-*]\s*/, '').trim())
-      const iwm21Text = bulletLines.length > 0 ? bulletLines.join('\n') : optionText
+      const iwm21Text = bulletLines.length > 0 ? bulletLines.map((l: string) => `• ${l}`).join('\n') : optionText
 
       renderedXml = replaceThirdCellContent(renderedXml, /^Stormwater\s*Treatment$/i,
         iwm21Text,
@@ -2529,10 +2532,10 @@ async function fillWordTemplate(
     ])
   }
 
-  // ── Ceiling fans: delete line when 0% or unfilled ─────────────────────────
+  // ── Ceiling fans: delete line when 0, 0%, or unfilled ────────────────────
   renderedXml = deleteParagraphsByText(renderedXml, [
-    /(?:\b0%\b|\[XX\]%|\[XX%\]|\[fans\]%|\[Fans\]%).*ceiling fan/i,
-    /ceiling fan.*(?:\b0%\b|\[XX\]%|\[XX%\]|\[fans\]%|\[Fans\]%)/i,
+    /(?:\b0%?\b|\[XX\]%?|\[XX%\]|\[fans\]%?|\[Fans\]%?).*ceiling fan/i,
+    /ceiling fan.*(?:\b0%?\b|\[XX\]%?|\[XX%\]|\[fans\]%?|\[Fans\]%?)/i,
   ])
 
   // ── Retail / commercial line items ────────────────────────────────────────
@@ -2636,11 +2639,11 @@ async function fillWordTemplate(
 
 // ─── Excel template filling ───────────────────────────────────────────────────
 
-function fillExcelResidential(
+async function fillExcelResidential(
   templatePath: string,
   project: ReportProjectData,
   credits: ReportCreditData[],
-): Buffer {
+): Promise<Buffer> {
   const zip = new PizZip(fs.readFileSync(templatePath, 'binary'))
   const sheetPath = findSheetXmlPath(zip, 'Inputs Residential & Mixed-Use')
   let ws = zip.file(sheetPath)!.asText()
@@ -2648,6 +2651,48 @@ function fillExcelResidential(
   ws = patchCell(ws, 'D5', project.address ?? '')
 
   if (project.totalDwellings != null) ws = patchCell(ws, 'D6', project.totalDwellings)
+
+  // I6: FR climate zone from postcode lookup
+  {
+    const postcodeClimateZones = await getPostcodeClimateZoneMap()
+    const postcode = extractPostcode(project.rawAddress ?? project.address)
+    const climateZone = postcode != null ? postcodeClimateZones.get(postcode) : undefined
+    if (climateZone != null) ws = patchCell(ws, 'I6', climateZone)
+  }
+
+  // D7: average m² per apartment/TH — total floor area ÷ total count, from last row of dwellings table
+  {
+    const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+    const searchRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
+    const totalAreaMatch = searchRaw.match(/\btotal\b[^\n]*?\b(\d[\d,]*(?:\.\d+)?)\s*m[²2]/i)
+      ?? searchRaw.match(/\btotal\b[^\n]*?(\d[\d,]*(?:\.\d+)?)\s*(?:sqm|sq\.?m)/i)
+    const totalCount = project.totalDwellings ?? getTotalApartments(credits)
+    if (totalAreaMatch && totalCount && totalCount > 0) {
+      const totalArea = parseFloat(totalAreaMatch[1].replace(/,/g, ''))
+      const avgM2 = Math.round(totalArea / totalCount)
+      if (avgM2 > 0) ws = patchCell(ws, 'D7', avgM2)
+    }
+  }
+
+  // D8: total retail area, D9: total office area — from OE 2.x rawDataPoints
+  {
+    const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+    const allRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
+    const retailArea = extractNumber(allRaw, [
+      /total\s+(?:retail\s+)?area[^:\n]*retail[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /retail[^:\n]*total\s+area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /total\s+retail\s+(?:floor\s+)?area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /retail[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i,
+    ])
+    const officeArea = extractNumber(allRaw, [
+      /total\s+(?:office\s+)?area[^:\n]*office[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /office[^:\n]*total\s+area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /total\s+office\s+(?:floor\s+)?area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /office[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i,
+    ])
+    if (retailArea != null) ws = patchCell(ws, 'D8', retailArea)
+    if (officeArea != null) ws = patchCell(ws, 'D9', officeArea)
+  }
 
   const oe12 = findCredit(credits, 'oe 1.2')
   if (oe12?.rawDataPoints) {
@@ -2659,13 +2704,19 @@ function fillExcelResidential(
     if (stars != null) ws = patchCell(ws, 'D23', stars)
   }
 
-  const oe11 = findCredit(credits, 'oe 1.1')
-  if (oe11?.rawDataPoints) {
-    const heating = extractNumber(oe11.rawDataPoints, [
+  {
+    const oe11Raw = findCredit(credits, 'oe 1.1')?.rawDataPoints ?? ''
+    const oe12Raw = findCredit(credits, 'oe 1.2')?.rawDataPoints ?? ''
+    const energyRaw = `${oe11Raw}\n${oe12Raw}`
+    const heating = extractNumber(energyRaw, [
+      /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
+      /annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
       /heating[^:]*:\s*([\d.,]+)\s*mj/i,
       /heating load[^:]*:\s*([\d.,]+)/i,
     ])
-    const cooling = extractNumber(oe11.rawDataPoints, [
+    const cooling = extractNumber(energyRaw, [
+      /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*cool[^:]*:\s*([\d.,]+)/i,
+      /annual\s+energy\s+loads?\s*[-–]\s*cool[^:]*:\s*([\d.,]+)/i,
       /cooling[^:]*:\s*([\d.,]+)\s*mj/i,
       /cooling load[^:]*:\s*([\d.,]+)/i,
     ])
@@ -2706,10 +2757,12 @@ function fillExcelResidential(
     if (oe34?.rawDataPoints) {
       const raw = oe34.rawDataPoints
       const dryRef = extractNumber(raw, [
+        /clothes\s*drying\s*reference\s*\(bess\)[^:\n]*:\s*([\d,.]+)/i,
         /reference[^:\n]*:\s*([\d,.]+)\s*kwh/i,
         /([\d,.]+)\s*kwh[^.\n]*reference/i,
       ])
       const dryProp = extractNumber(raw, [
+        /clothes\s*drying\s*proposed\s*\(bess\)[^:\n]*:\s*([\d,.]+)/i,
         /proposed[^:\n]*:\s*([\d,.]+)\s*kwh/i,
         /([\d,.]+)\s*kwh[^.\n]*proposed/i,
       ])
@@ -2910,11 +2963,11 @@ export async function generateSMPReport(
   // Override wins; then fall back to what was stored on the project record
   const resolvedTotalDwellings = overrides?.totalDwellings ?? project.totalDwellings ?? null
 
-  const projectWithFormattedAddress = { ...project, address: formattedAddress, totalDwellings: resolvedTotalDwellings }
+  const projectWithFormattedAddress = { ...project, address: formattedAddress, rawAddress: project.address, totalDwellings: resolvedTotalDwellings }
 
   const excelBuffer = typology === 'Non-Residential'
     ? fillExcelNonResidential(excelTemplatePath, projectWithFormattedAddress, credits)
-    : fillExcelResidential(excelTemplatePath, projectWithFormattedAddress, credits)
+    : await fillExcelResidential(excelTemplatePath, projectWithFormattedAddress, credits)
 
   const wordBuffer = await fillWordTemplate(
     wordTemplatePath,
