@@ -270,12 +270,22 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       const kw = kwMatch ? kwMatch[1] : null
       if (kw) {
         const orientMatch =
-          raw.match(/orientation[^:\n]*:\s*([^\n,;.]+)/i) ??
+          raw.match(/(?:panel\s+)?orientation[^:\n]*:\s*([^\n,;.]+)/i) ??
+          raw.match(/azimuth[^:\n]*:\s*([^\n,;.]+)/i) ??
+          raw.match(/(?:roof\s+)?direction[^:\n]*:\s*([^\n,;.]+)/i) ??
+          raw.match(/facing[^:\n]*:\s*([^\n,;.]+)/i) ??
           raw.match(/facing\s+(?:due\s+)?([A-Za-z/ -]+)/i)
         const tiltMatch =
           raw.match(/(?:tilt|inclination|angle)[^:\n]*:\s*([\d.]+)\s*°?/i) ??
           raw.match(/([\d.]+)\s*°\s*(?:tilt|inclination)/i)
-        const orientation = orientMatch ? orientMatch[1].trim() : '[XX]'
+        // Convert numeric azimuth (degrees) to compass direction if needed
+        let orientRaw = orientMatch ? orientMatch[1].trim() : null
+        if (orientRaw && /^\d+(\.\d+)?°?$/.test(orientRaw.trim())) {
+          const deg = parseFloat(orientRaw)
+          const dirs = ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West']
+          orientRaw = dirs[Math.round(deg / 45) % 8]
+        }
+        const orientation = orientRaw ?? '[XX]'
         const tilt = tiltMatch ? `${tiltMatch[1]}°` : '[XX]'
         const comment = `A total ${kw}kW solar PV system is to be installed at roof. The system is to be installed facing due ${orientation} at a ${tilt} inclination.`
         await prisma.credit.update({ where: { id: credit.id }, data: { commentsGIW: comment } })
@@ -408,7 +418,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       const areaLabel = isLiving ? 'living areas' : 'bedrooms'
 
       // Pathway detection (mirrors report.ts logic)
-      const usedDtS = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(raw) || /\bdts\b|dts.*path/i.test(raw)
+      const usedDtS = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(raw)
       const usedBuiltIn =
         /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(raw) ||
         /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(raw) ||
@@ -507,6 +517,25 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         await prisma.credit.update({
           where: { id: credit.id },
           data: { commentsGIW: `${count} bicycle spaces for residential visitors.` },
+        })
+        continue
+      }
+    }
+
+    // Urban Ecology 1.1: extract communal open space area
+    if (/^urban\s+ecology\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const areaMatch =
+        raw.match(/total\s+(?:area\s+of\s+)?communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
+        raw.match(/communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
+        raw.match(/communal\s+space[^:\n]*:\s*([\d,]+)/i) ??
+        raw.match(/([\d,]+)\s*m2?\s+(?:of\s+)?communal/i) ??
+        raw.match(/communal[^:\n]*:\s*([\d,]+)\s*m2?/i)
+      const area = areaMatch ? areaMatch[1].replace(/,/g, '') : null
+      if (area) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `Min. ${area}m2 of communal space (currently satisfied).` },
         })
         continue
       }

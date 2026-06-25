@@ -447,7 +447,7 @@ ${giwXXCredits.map(c => `    "${c.creditId}": "<fill all [XX] in the GIW comment
     "daylight living": "<% of living areas with adequate daylight from IEQ 1.x e.g. '75%', or null>",
     "daylight bedrooms": "<% of bedrooms with adequate daylight from IEQ 1.x e.g. '65%', or null>",
     "daylight non-resi": "<% of non-residential areas with adequate daylight from IEQ rawDataPoints e.g. '60%', or null>",
-    "natural ventilation% (XX out of XX)": "<cross-ventilation formatted as 'N% (X out of Y)' from IEQ 2.3, or null>",
+    "natural ventilation% (XX out of XX)": "<cross-ventilation formatted as 'N% (X out of Y)' from IEQ 2.1 rawDataPoints, or null>",
     "winter sunlight% (XX out of XX)": "<winter sunlight formatted as 'N% (X out of Y)' from IEQ 1.3, or null>",
     "ventilation non-resi": "<non-residential ventilation approach in one sentence from IEQ 2.3, or null>",
     "Ventilation Non-Resi": "<same as ventilation non-resi>",
@@ -966,9 +966,9 @@ function applyBESSFallbacks(xml: string, credits: ReportCreditData[], project: R
 
   // ── Natural ventilation: second [XX% (XX out of XX)] ─────────────────────
   if (xml.includes('[XX% (XX out of XX)]')) {
-    const ieq23 = findCredit(credits, 'ieq 2.3')
-    if (ieq23?.rawDataPoints) {
-      const fmt = formatBESSPercentage(ieq23.rawDataPoints, totalApts)
+    const ieq21 = findCreditLike(credits, 'ieq 2.1')
+    if (ieq21?.rawDataPoints) {
+      const fmt = formatBESSPercentage(ieq21.rawDataPoints, totalApts)
       if (fmt) xml = xml.replace('[XX% (XX out of XX)]', () => fmt)
     }
   }
@@ -1894,17 +1894,17 @@ async function fillWordTemplate(
     }
   }
 
-  // ── Natural ventilation % from IEQ 2.3 ──────────────────────────────────
+  // ── Natural ventilation % from IEQ 2.1 (residential cross-ventilation) ───
   if (!namedValues['natural ventilation% (XX out of XX)']) {
-    const ieq23nv = findCreditLike(credits, 'ieq 2.3')
-    console.log('[report] IEQ 2.3 found:', !!ieq23nv, '| rawDataPoints:', ieq23nv?.rawDataPoints?.slice(0, 200))
-    if (ieq23nv?.rawDataPoints) {
+    const ieq21 = findCreditLike(credits, 'ieq 2.1')
+    console.log('[report] IEQ 2.1 found:', !!ieq21, '| rawDataPoints:', ieq21?.rawDataPoints?.slice(0, 200))
+    if (ieq21?.rawDataPoints) {
       const totalApts = project.totalDwellings ?? getTotalApartments(credits)
-      const fmt = formatBESSPercentage(ieq23nv.rawDataPoints, totalApts)
-      console.log('[report] IEQ 2.3 formatBESSPercentage result:', fmt, '| totalApts:', totalApts)
+      const fmt = formatBESSPercentage(ieq21.rawDataPoints, totalApts)
+      console.log('[report] IEQ 2.1 formatBESSPercentage result:', fmt, '| totalApts:', totalApts)
       if (fmt) {
         namedValues['natural ventilation% (XX out of XX)'] = fmt
-        console.log('[report] Natural ventilation from IEQ 2.3:', fmt)
+        console.log('[report] Natural ventilation from IEQ 2.1:', fmt)
       }
     }
   }
@@ -2429,6 +2429,17 @@ async function fillWordTemplate(
       )
     }
 
+    // If MUSIC modelling tool is selected in IWM 2.1, replace "Blue Factor" with "MUSIC" in the stormwater options text
+    {
+      const iwm21Raw = findCreditLike(credits, 'iwm 2.1')?.rawDataPoints ?? ''
+      const usesMUSIC = /\bmusic\b/i.test(iwm21Raw)
+      if (usesMUSIC) {
+        renderedXml = renderedXml.replace(/<w:t([^>]*)>([^<]*)<\/w:t>/g, (_m: string, attrs: string, text: string) =>
+          `<w:t${attrs}>${text.replace(/compliant\s+Blue\s+Factor\s+result/gi, 'compliant MUSIC result')}</w:t>`
+        )
+      }
+    }
+
     const shadingCredit = findCreditLike(credits, 'ieq 3.2') ?? findCreditLike(credits, 'ieq 3.4')
     if (shadingCredit?.commentsGIW?.trim()) {
       const shadingId = shadingCredit.creditId.toLowerCase()
@@ -2768,7 +2779,8 @@ async function fillExcelResidential(
 
   ws = patchCell(ws, 'D5', project.address ?? '')
 
-  if (project.totalDwellings != null) ws = patchCell(ws, 'D6', project.totalDwellings)
+  const d6Dwellings = project.totalDwellings ?? getTotalApartments(credits)
+  if (d6Dwellings != null) ws = patchCell(ws, 'D6', d6Dwellings)
 
   // I5: NatHERS climate zone station number; I6: FR climate zone matched to dropdown option
   {
@@ -2841,14 +2853,19 @@ async function fillExcelResidential(
     const heating = extractNumber(energyRaw, [
       /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
       /annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
+      /heating\s+\(mj[^)]*\)[^:]*:\s*([\d.,]+)/i,
       /heating[^:]*:\s*([\d.,]+)\s*mj/i,
       /heating load[^:]*:\s*([\d.,]+)/i,
+      /(?:total\s+)?heating[^:\n]*:\s*([\d.,]+)/i,
     ])
     const cooling = extractNumber(energyRaw, [
       /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*cool[^:]*:\s*([\d.,]+)/i,
       /annual\s+energy\s+loads?\s*[-–]\s*cool[^:]*:\s*([\d.,]+)/i,
+      /cooling\s+\(mj[^)]*\)[^:]*:\s*([\d.,]+)/i,
       /cooling[^:]*:\s*([\d.,]+)\s*mj/i,
       /cooling load[^:]*:\s*([\d.,]+)/i,
+      /(?:total\s+)?cooling[^:\n]*:\s*([\d.,]+)/i,
+      /\bcool\b[^:\n]*:\s*([\d.,]+)/i,
     ])
     console.log('[excel] D24 heating:', heating, '  D25 cooling:', cooling)
     if (heating != null) ws = patchCell(ws, 'D24', heating)
@@ -2890,13 +2907,19 @@ async function fillExcelResidential(
       console.log('[excel] D33/D34 OE3.4 raw (first 500):', raw.slice(0, 500))
       const dryRef = extractNumber(raw, [
         /clothes\s*drying\s*reference\s*\(bess\)[^:\n]*:\s*([\d,.]+)/i,
+        /clothes\s+dry[^:\n]*reference[^:\n]*:\s*([\d,.]+)/i,
+        /reference\s+consumption[^:\n]*:\s*([\d,.]+)/i,
         /reference[^:\n]*:\s*([\d,.]+)\s*kwh/i,
         /([\d,.]+)\s*kwh[^.\n]*reference/i,
+        /reference[^:\n]*energy[^:\n]*:\s*([\d,.]+)/i,
       ])
       const dryProp = extractNumber(raw, [
         /clothes\s*drying\s*proposed\s*\(bess\)[^:\n]*:\s*([\d,.]+)/i,
+        /clothes\s+dry[^:\n]*proposed[^:\n]*:\s*([\d,.]+)/i,
+        /proposed\s+consumption[^:\n]*:\s*([\d,.]+)/i,
         /proposed[^:\n]*:\s*([\d,.]+)\s*kwh/i,
         /([\d,.]+)\s*kwh[^.\n]*proposed/i,
+        /proposed[^:\n]*energy[^:\n]*:\s*([\d,.]+)/i,
       ])
       console.log('[excel] D33 dryRef:', dryRef, '  D34 dryProp:', dryProp)
       if (dryRef != null) ws = patchCell(ws, 'D33', dryRef)
