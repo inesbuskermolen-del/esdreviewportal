@@ -20,8 +20,8 @@ async function getPostcodeClimateZoneMap(): Promise<Map<number, number>> {
   const map = new Map<number, number>()
   ws.eachRow((row, rowNum) => {
     if (rowNum < 3) return // skip header rows
-    const postcode = Number(row.getCell(2).value)
-    const zone = Number(row.getCell(3).value)
+    const postcode = Number(row.getCell(1).value) // col A = postcode
+    const zone = Number(row.getCell(2).value)     // col B = station number (e.g. 21, 60, 62)
     if (!isNaN(postcode) && !isNaN(zone) && zone > 0) map.set(postcode, zone)
   })
   _postcodeClimateZoneCache = map
@@ -612,7 +612,7 @@ function extractHwDescription(raw: string): string | null {
   // Prefer explicit "Type of Hot Water System: X" from BESS — use X verbatim (lowercased)
   const typeMatch = raw.match(/type of hot water system\s*:\s*([^\n.;]+)/i)
   if (typeMatch) {
-    const bType = typeMatch[1].trim().toLowerCase()
+    const bType = typeMatch[1].replace(/^[\s│|]+/, '').trim().toLowerCase()
     // Map known BESS dropdown values to report phrasing
     if (/individual.*electric.*instant|electric.*instant/i.test(bType)) return 'individual electric instantaneous hot water systems'
     if (/individual.*electric.*storage/i.test(bType)) return 'individual electric storage hot water systems'
@@ -788,9 +788,9 @@ function removeNonResidentialLines(xml: string, hasRetail: boolean, hasCommercia
   }
   if (!hasCommercial) {
     xml = deleteParagraphsByText(xml, [
-      /^(?:\[XX\]|\d[\d,.]*)m2\s+(?:commercial|office)$/i,
+      /^(?:\[XX\]|\d[\d,.]*)m2\s+commercial$/i,
       /^\[total area office\]$/i,
-      /^(?:\d+\s+)?(?:commercial|office)\s+tenanci(?:es|y)$/i,
+      /^(?:\d+\s+)?commercial\s+tenanci(?:es|y)$/i,
     ])
     xml = removePlaceholdersFromRuns(xml, [/\[total office\]/gi, /\[total area office\]/gi])
   }
@@ -1426,6 +1426,48 @@ function deleteTableRowsContaining(xml: string, identifyingText: string): string
 
 // ─── Excel cell patching (PizZip-based, preserves charts and drawings) ───────
 
+/**
+ * Read string values from a contiguous single-column range in a zip sheet.
+ * rangeRef format: "'Sheet Name'!$A$1:$A$3" or "Sheet!$A$1:$A$3"
+ */
+function readZipRangeValues(zip: PizZip, rangeRef: string): string[] {
+  const m = rangeRef.match(/^'?([^'!]+)'?!\$([A-Z]+)\$(\d+):\$[A-Z]+\$(\d+)$/)
+  if (!m) return []
+  const [, sheetName, col, startStr, endStr] = m
+  const start = parseInt(startStr), end = parseInt(endStr)
+  try {
+    const sheetPath = findSheetXmlPath(zip, sheetName)
+    const sheetXml = zip.file(sheetPath)!.asText()
+    const ssXml = zip.file('xl/sharedStrings.xml')?.asText() ?? ''
+    const strings = [...ssXml.matchAll(/<si>[\s\S]*?<\/si>/g)].map(sm =>
+      sm[0].replace(/<[^>]+>/g, '').trim()
+    )
+    const results: string[] = []
+    for (let row = start; row <= end; row++) {
+      const cellM = sheetXml.match(new RegExp(`<c r="${col}${row}"[^>]* t="s"[^>]*><v>(\\d+)</v></c>`))
+      if (cellM) results.push(strings[parseInt(cellM[1])] ?? '')
+    }
+    return results.filter(Boolean)
+  } catch { return [] }
+}
+
+/**
+ * Find the x14:dataValidation range formula for a given cell ref.
+ */
+function getX14DropdownRange(wsXml: string, cellRef: string): string | null {
+  const dvRe = /<x14:dataValidation\b[\s\S]*?<\/x14:dataValidation>/g
+  let m: RegExpExecArray | null
+  while ((m = dvRe.exec(wsXml)) !== null) {
+    const sqrefM = m[0].match(/<xm:sqref>([^<]+)<\/xm:sqref>/)
+    if (!sqrefM) continue
+    if (sqrefM[1].split(/\s+/).includes(cellRef)) {
+      const fM = m[0].match(/<xm:f>([^<]+)<\/xm:f>/)
+      return fM ? fM[1] : null
+    }
+  }
+  return null
+}
+
 function findSheetXmlPath(zip: PizZip, sheetName: string): string {
   const wbXml = zip.file('xl/workbook.xml')!.asText()
   const relsXml = zip.file('xl/_rels/workbook.xml.rels')!.asText()
@@ -1472,6 +1514,16 @@ function bestDropdownMatch(value: string, options: string[]): string {
 
 function patchCellDropdown(wsXml: string, cellRef: string, value: string): string {
   const options = getInlineDropdownOptions(wsXml, cellRef)
+  const toWrite = (options && options.length > 0) ? bestDropdownMatch(value, options) : value
+  return patchCell(wsXml, cellRef, toWrite)
+}
+
+function patchCellDropdownExt(zip: PizZip, wsXml: string, cellRef: string, value: string): string {
+  let options = getInlineDropdownOptions(wsXml, cellRef)
+  if (!options || options.length === 0) {
+    const range = getX14DropdownRange(wsXml, cellRef)
+    if (range) options = readZipRangeValues(zip, range)
+  }
   const toWrite = (options && options.length > 0) ? bestDropdownMatch(value, options) : value
   return patchCell(wsXml, cellRef, toWrite)
 }
@@ -1776,16 +1828,6 @@ async function fillWordTemplate(
           console.log('[report] Collection area from IWM 2.1:', m[1])
         }
       }
-      // Fallback: search all IWM credits for the rainwater tank roof area BESS question
-      if (!namedValues['collection area']) {
-        const iwmRaw = credits.filter(c => /^iwm/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
-        const m = iwmRaw.match(/total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\??\s*:\s*([\d,]+)/i) ??
-                  iwmRaw.match(/roof\s+area\s+connected[^:\n]*:\s*([\d,]+)/i)
-        if (m) {
-          namedValues['collection area'] = m[1].replace(/,/g, '')
-          console.log('[report] Collection area from rainwater tank profile:', m[1])
-        }
-      }
       if (!namedValues['raingarden size'] && !namedValues['raingarden area']) {
         const m = workingText.match(/rain\s*garden[^:\n]*:\s*([\d,]+)/i) ??
                   workingText.match(/([\d,]+)\s*m[²2]\s*rain\s*garden/i)
@@ -1796,6 +1838,22 @@ async function fillWordTemplate(
           console.log('[report] Raingarden size from IWM 2.1:', val)
         }
       }
+    }
+  }
+
+  // ── Collection area: search all IWM rawDataPoints unconditionally ─────────
+  // Runs outside the searchText guard so it works even when IWM 2.1 has no GIW comment.
+  if (!namedValues['collection area']) {
+    const iwmRaw = credits.filter(c => /^iwm/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+    console.log('[report] Collection area fallback — IWM raw (first 300):', iwmRaw.slice(0, 300))
+    const m = iwmRaw.match(/total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\??\s*:\s*([\d,]+)/i) ??
+              iwmRaw.match(/what\s+is\s+the\s+total\s+roof\s+area[^:\n]*:\s*([\d,]+)/i) ??
+              iwmRaw.match(/roof\s+area\s+connected[^:\n]*:\s*([\d,]+)/i)
+    if (m) {
+      namedValues['collection area'] = m[1].replace(/,/g, '')
+      console.log('[report] Collection area from IWM rawDataPoints:', m[1])
+    } else {
+      console.log('[report] Collection area: no match found in IWM raw data')
     }
   }
 
@@ -1819,9 +1877,11 @@ async function fillWordTemplate(
   // ── Winter sunlight from IEQ 1.3 ─────────────────────────────────────────
   if (!namedValues['winter sunlight% (XX out of XX)']) {
     const ieq13 = findCreditLike(credits, 'ieq 1.3')
+    console.log('[report] IEQ 1.3 found:', !!ieq13, '| rawDataPoints:', ieq13?.rawDataPoints?.slice(0, 200))
     if (ieq13?.rawDataPoints) {
       const totalApts = project.totalDwellings ?? getTotalApartments(credits)
       const fmt = formatBESSPercentage(ieq13.rawDataPoints, totalApts)
+      console.log('[report] IEQ 1.3 formatBESSPercentage result:', fmt, '| totalApts:', totalApts)
       if (fmt) {
         namedValues['winter sunlight% (XX out of XX)'] = fmt
         console.log('[report] Winter sunlight from IEQ 1.3:', fmt)
@@ -1832,9 +1892,11 @@ async function fillWordTemplate(
   // ── Natural ventilation % from IEQ 2.3 ──────────────────────────────────
   if (!namedValues['natural ventilation% (XX out of XX)']) {
     const ieq23nv = findCreditLike(credits, 'ieq 2.3')
+    console.log('[report] IEQ 2.3 found:', !!ieq23nv, '| rawDataPoints:', ieq23nv?.rawDataPoints?.slice(0, 200))
     if (ieq23nv?.rawDataPoints) {
       const totalApts = project.totalDwellings ?? getTotalApartments(credits)
       const fmt = formatBESSPercentage(ieq23nv.rawDataPoints, totalApts)
+      console.log('[report] IEQ 2.3 formatBESSPercentage result:', fmt, '| totalApts:', totalApts)
       if (fmt) {
         namedValues['natural ventilation% (XX out of XX)'] = fmt
         console.log('[report] Natural ventilation from IEQ 2.3:', fmt)
@@ -1930,17 +1992,17 @@ async function fillWordTemplate(
     }
   }
 
-  // Alias compound placeholder keys to the compact names used in the MixUse/Commercial templates.
-  // The Claude prompt uses descriptive keys like "natural ventilation% (XX out of XX)" but the
-  // templates use [naturalventilation%], [wintersunlight%], [orientation%].
-  const compactAliases: [string, string][] = [
-    ['natural ventilation% (XX out of XX)', 'naturalventilation%'],
-    ['winter sunlight% (XX out of XX)',     'wintersunlight%'],
-    ['orientation% (XX out of XX)',         'orientation%'],
+  // Alias compound placeholder keys across all forms used in templates.
+  // Claude prompt uses spaced keys like "natural ventilation% (XX out of XX)";
+  // templates use [naturalventilation%], [wintersunlight%], or [naturalventilation% (XX out of XX)].
+  const compactAliases: [string, ...string[]][] = [
+    ['natural ventilation% (XX out of XX)', 'naturalventilation%', 'naturalventilation% (XX out of XX)'],
+    ['winter sunlight% (XX out of XX)',     'wintersunlight%',    'wintersunlight% (XX out of XX)'],
+    ['orientation% (XX out of XX)',         'orientation%',       'orientation% (XX out of XX)'],
   ]
-  for (const [full, compact] of compactAliases) {
-    const val = namedValues[full] ?? namedValues[compact]
-    if (val) { namedValues[full] = val; namedValues[compact] = val }
+  for (const [full, ...variants] of compactAliases) {
+    const val = namedValues[full] ?? variants.map(v => namedValues[v]).find(Boolean)
+    if (val) { namedValues[full] = val; for (const v of variants) namedValues[v] = val }
   }
 
   const unwrapDocxtemplaterError = (err: unknown): never => {
@@ -1986,7 +2048,7 @@ async function fillWordTemplate(
   try {
     doc!.render({
       // Spread namedValues first so explicit keys below take precedence
-      ...Object.fromEntries(Object.entries(namedValues).filter(([, v]) => v != null && v !== '')),
+      ...Object.fromEntries(Object.entries(namedValues).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, formatNum(v)])),
       GIWREF: data.giwref,
       'Project Address': data.projectAddress,
       Client: data.client,
@@ -2028,7 +2090,7 @@ async function fillWordTemplate(
   // Must run before deleteTableRows — Claude's rowsToDelete may include template
   // Innovation criteria names, which would remove the templateRow needed to build new rows.
   try {
-    const innovCredit = credits.find(c => /^inn(?:ovation)?\s*1\.1/i.test(c.creditId))
+    const innovCredit = credits.find(c => /^inn(?:ovation)?(\s+\d[\d.]*)?$/i.test(c.creditId.trim()))
     const bessPoints = innovCredit?.rawDataPoints ? parseInnovationPoints(innovCredit.rawDataPoints) : []
     if (bessPoints.length > 0) {
       renderedXml = syncInnovationTable(renderedXml, bessPoints)
@@ -2047,7 +2109,13 @@ async function fillWordTemplate(
   if (rowsToDelete.length > 0) {
     // These rows must always remain regardless of credit status
     const NEVER_DELETE = /embodied\s*energy|structural.*steel|sustainable\s*timber|\bpvc\b|sustainable\s*products|building\s*re-?use|bicycle\s*parking|end\s*of\s*trip|motorbike|construction\s*and\s*demolition\s*waste|thermal\s*performance\s*rating.*non.resi/i
-    const safeToDelete = rowsToDelete.filter(r => !NEVER_DELETE.test(r))
+    const ieq41 = findCreditLike(credits, 'ieq 4.1')
+    const ieq41Achieved = !!ieq41 && !['ScopedOut', 'N', 'Not Achieved', 'N/A'].includes(ieq41.creditStatus)
+    const safeToDelete = rowsToDelete.filter(r => {
+      if (NEVER_DELETE.test(r)) return false
+      if (ieq41Achieved && /air quality.*non.resi/i.test(r)) return false
+      return true
+    })
     if (safeToDelete.length > 0) {
       safeApply('deleteTableRows', () => {
         const result = deleteTableRows(renderedXml, safeToDelete)
@@ -2332,11 +2400,7 @@ async function fillWordTemplate(
         /Refer\s*WSUD/i,
         true)
 
-      // ── WSUD appendix: replace Blue Factor bullet points with same GIW comment ──
-      renderedXml = deleteParagraphsByText(renderedXml, [
-        /rainwater.*collected from.*raingarden/i,
-        /raingarden.*extended\s+detention/i,
-      ])
+      // ── WSUD appendix: replace first matching paragraph with GIW comment ──────
       let wsudReplaced = false
       renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
         if (wsudReplaced) return para
@@ -2591,6 +2655,44 @@ async function fillWordTemplate(
     }
   }
 
+  // ── Multiple rainwater tanks: duplicate the tank sentence for each tank ─────
+  {
+    const iwmRaw = credits.filter(c => /^iwm/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
+    // Match "Rainwater Tank 1: 12000" / "Rainwater Tank 2  15000" patterns from BESS tank profile table
+    const tankMatches = [
+      ...iwmRaw.matchAll(/rainwater\s+tank\s+\d+[^:\n\d]*:?\s*([\d,]+)\s*(kl|l|litres?|liters?)?/gi),
+      // Fallback: generic tank size / storage volume labels
+      ...iwmRaw.matchAll(/(?:tank\s+(?:storage\s+)?volume|storage\s+volume|tank\s+(?:size|capacity))[^:\n]*:\s*([\d,]+)\s*(kl|l|litres?|liters?)?/gi),
+    ]
+    const tankSizes = [
+      ...new Set(
+        tankMatches.map(m => {
+          const num = parseInt(m[1].replace(/,/g, ''))
+          return /kl/i.test(m[2] ?? '') ? num * 1000 : num
+        }).filter(n => !isNaN(n) && n > 0)
+      ),
+    ]
+    console.log('[report] Rainwater tank sizes detected:', tankSizes)
+    if (tankSizes.length >= 2) {
+      let replaced = false
+      renderedXml = renderedXml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para: string) => {
+        if (replaced) return para
+        const combined = [...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m => m[1]).join('')
+        if (!/litre[s]?\s+rainwater\s+tank\s+will\s+harvest/i.test(combined)) return para
+        replaced = true
+        const pPr = (para.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/) ?? [])[0] ?? ''
+        const rPr = (para.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/) ?? [])[0] ?? ''
+        // Find the current capacity number in the rendered text and replace per tank
+        const currentSize = formatNum(String(project.rainwaterTankSize ?? tankSizes[0]))
+        return tankSizes.map(size => {
+          const newSize = formatNum(String(size))
+          const newText = combined.replace(currentSize, newSize)
+          return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(newText)}</w:t></w:r></w:p>`
+        }).join('')
+      })
+    }
+  }
+
   // ── BESS rawDataPoints fallbacks (catches any unfilled placeholders) ──────
   safeApply('applyBESSFallbacks', () => applyBESSFallbacks(renderedXml, credits, project))
 
@@ -2652,21 +2754,30 @@ async function fillExcelResidential(
 
   if (project.totalDwellings != null) ws = patchCell(ws, 'D6', project.totalDwellings)
 
-  // I6: FR climate zone from postcode lookup
+  // I5: NatHERS climate zone station number; I6: FR climate zone matched to dropdown option
   {
     const postcodeClimateZones = await getPostcodeClimateZoneMap()
     const postcode = extractPostcode(project.rawAddress ?? project.address)
     const climateZone = postcode != null ? postcodeClimateZones.get(postcode) : undefined
-    if (climateZone != null) ws = patchCell(ws, 'I6', climateZone)
+    if (climateZone != null) {
+      ws = patchCell(ws, 'I5', climateZone)
+      // I6 dropdown options are e.g. "21 Melbourne" — match by numeric prefix
+      const i6Range = getX14DropdownRange(ws, 'I6')
+      const i6Options = i6Range ? readZipRangeValues(zip, i6Range) : []
+      const i6Match = i6Options.find(o => o.startsWith(String(climateZone) + ' ')) ?? String(climateZone)
+      ws = patchCell(ws, 'I6', i6Match)
+    }
   }
 
   // D7: average m² per apartment/TH — total floor area ÷ total count, from last row of dwellings table
   {
     const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
     const searchRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
+    console.log('[excel] D7 OE2 raw (first 500):', searchRaw.slice(0, 500))
     const totalAreaMatch = searchRaw.match(/\btotal\b[^\n]*?\b(\d[\d,]*(?:\.\d+)?)\s*m[²2]/i)
       ?? searchRaw.match(/\btotal\b[^\n]*?(\d[\d,]*(?:\.\d+)?)\s*(?:sqm|sq\.?m)/i)
     const totalCount = project.totalDwellings ?? getTotalApartments(credits)
+    console.log('[excel] D7 totalAreaMatch:', totalAreaMatch?.[1], '  totalCount:', totalCount)
     if (totalAreaMatch && totalCount && totalCount > 0) {
       const totalArea = parseFloat(totalAreaMatch[1].replace(/,/g, ''))
       const avgM2 = Math.round(totalArea / totalCount)
@@ -2678,6 +2789,7 @@ async function fillExcelResidential(
   {
     const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
     const allRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
+    console.log('[excel] D8/D9 OE2 raw (first 500):', allRaw.slice(0, 500))
     const retailArea = extractNumber(allRaw, [
       /total\s+(?:retail\s+)?area[^:\n]*retail[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
       /retail[^:\n]*total\s+area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
@@ -2690,6 +2802,7 @@ async function fillExcelResidential(
       /total\s+office\s+(?:floor\s+)?area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
       /office[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i,
     ])
+    console.log('[excel] D8 retailArea:', retailArea, '  D9 officeArea:', officeArea)
     if (retailArea != null) ws = patchCell(ws, 'D8', retailArea)
     if (officeArea != null) ws = patchCell(ws, 'D9', officeArea)
   }
@@ -2708,6 +2821,7 @@ async function fillExcelResidential(
     const oe11Raw = findCredit(credits, 'oe 1.1')?.rawDataPoints ?? ''
     const oe12Raw = findCredit(credits, 'oe 1.2')?.rawDataPoints ?? ''
     const energyRaw = `${oe11Raw}\n${oe12Raw}`
+    console.log('[excel] D24/D25 OE1.1+1.2 raw (first 500):', energyRaw.slice(0, 500))
     const heating = extractNumber(energyRaw, [
       /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
       /annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
@@ -2720,6 +2834,7 @@ async function fillExcelResidential(
       /cooling[^:]*:\s*([\d.,]+)\s*mj/i,
       /cooling load[^:]*:\s*([\d.,]+)/i,
     ])
+    console.log('[excel] D24 heating:', heating, '  D25 cooling:', cooling)
     if (heating != null) ws = patchCell(ws, 'D24', heating)
     if (cooling != null) ws = patchCell(ws, 'D25', cooling)
   }
@@ -2756,6 +2871,7 @@ async function fillExcelResidential(
     const oe34 = findCreditLike(credits, 'oe 3.4')
     if (oe34?.rawDataPoints) {
       const raw = oe34.rawDataPoints
+      console.log('[excel] D33/D34 OE3.4 raw (first 500):', raw.slice(0, 500))
       const dryRef = extractNumber(raw, [
         /clothes\s*drying\s*reference\s*\(bess\)[^:\n]*:\s*([\d,.]+)/i,
         /reference[^:\n]*:\s*([\d,.]+)\s*kwh/i,
@@ -2766,6 +2882,7 @@ async function fillExcelResidential(
         /proposed[^:\n]*:\s*([\d,.]+)\s*kwh/i,
         /([\d,.]+)\s*kwh[^.\n]*proposed/i,
       ])
+      console.log('[excel] D33 dryRef:', dryRef, '  D34 dryProp:', dryProp)
       if (dryRef != null) ws = patchCell(ws, 'D33', dryRef)
       if (dryProp != null) ws = patchCell(ws, 'D34', dryProp)
     }
@@ -2778,7 +2895,11 @@ async function fillExcelResidential(
       /type[^:]*:\s*([^.;,\n]+)/i,
       /(heat pump|electric|gas|solar|instantaneous)[^.;,\n]*/i,
     ]) : null
-    if (hwType) ws = patchCellDropdown(ws, 'D51', hwType)
+    if (hwType) {
+      ws = patchCellDropdownExt(zip, ws, 'D51', hwType)
+      ws = patchCellDropdownExt(zip, ws, 'I50', hwType)
+      ws = patchCellDropdownExt(zip, ws, 'M50', hwType)
+    }
   }
 
   const iwm11 = findCredit(credits, 'iwm 1.1')

@@ -418,12 +418,12 @@ export async function generateGIWComments(projectId: string): Promise<void> {
 
       if (areaPct) {
         let comment: string
-        if (usedModelling && !usedBuiltIn) {
-          // Own calculations / daylight modelling pathway
-          comment = `${areaPct}% of the ${areaLabel} achieves the BESS best practice requirements.`
-        } else {
-          // Built-in calculator pathway (explicit or default when pathway not detected)
+        if (usedBuiltIn && !usedModelling) {
+          // Built-in calculator pathway explicitly detected
           comment = `The BESS built in daylight calculator has been applied to demonstrate compliance. ${areaPct}% of the ${areaLabel} achieve the BESS best practice daylight requirements.`
+        } else {
+          // Own calculations / daylight modelling pathway (default when no specific pathway detected, mirrors report.ts)
+          comment = `${areaPct}% of the ${areaLabel} achieves the BESS best practice requirements.`
         }
         await prisma.credit.update({
           where: { id: credit.id },
