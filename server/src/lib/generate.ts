@@ -78,7 +78,7 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
   'ieq 3.2': ['We recommend to add additional shading to the following areas:\n• [XX]\n• [XX]'],
   'ieq 3.4': ['We recommend to add additional shading to the following areas:\n• [XX]\n• [XX]'],
   'ieq 3.5': ['Ceiling fans are to be provided to [XX]% of the tenancies.'],
-  'ieq 4.1': ['Low VOC and / or formaldehyde products are to be used internally.'],
+  'ieq 4.1': ['Low VOC and formaldehyde products are to be used internally.'],
   'transport 1.1': ['[XX] secure bicycle spaces for residents.'],
   'transport 1.2': ['[XX] bicycle spaces for residential visitors.'],
   'transport 1.3': ['The majority of the residential bicycle parking spaces are located at ground or entry level.'],
@@ -294,6 +294,69 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       // No PV data found — fall through to "Not targeted." / scoped-out handling below
     }
 
+    // Transport 1.1–1.4: generate comment whenever a count/location is entered, regardless of credit status
+    if (/^transport\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const countMatch =
+        raw.match(/(\d+)\s*(?:secure\s+)?(?:resident(?:ial)?\s+)?bicycle\s+spaces?\s+(?:for\s+)?residents/i) ??
+        raw.match(/resident(?:ial)?\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
+        raw.match(/how many[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*resident(?:ial)?\s+bicycle/i)
+      const count = countMatch ? parseInt(countMatch[1], 10) : 0
+      if (count > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${count} secure bicycle spaces for residents.` },
+        })
+        continue
+      }
+    }
+
+    if (/^transport\s+1\.2$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const countMatch =
+        raw.match(/(\d+)\s*residential\s+visitor\s+bicycle/i) ??
+        raw.match(/(\d+)\s*visitor\s+bicycle[^.\n]*?resident/i) ??
+        raw.match(/residential\s+visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/how many[^?]*visitor[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*short[- ]?stay\s+bicycle/i)
+      const count = countMatch ? parseInt(countMatch[1], 10) : 0
+      if (count > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${count} bicycle spaces for residential visitors.` },
+        })
+        continue
+      }
+    }
+
+    if (/^transport\s+1\.3$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: 'The majority of the residential bicycle parking spaces are located at ground or entry level.' },
+      })
+      continue
+    }
+
+    if (/^transport\s+1\.4$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const raw = credit.rawDataPoints ?? ''
+      const countMatch =
+        raw.match(/(\d+)\s*(?:bicycle\s+spaces?\s+for\s+)?employees?\s+bicycle/i) ??
+        raw.match(/employee[^:\n]*bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*bicycle\s+spaces?\s+for\s+employees?/i) ??
+        raw.match(/how many[^?]*employee[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
+        raw.match(/(\d+)\s*(?:end[- ]of[- ]trip|eot)[^.\n]*bicycle/i)
+      const count = countMatch ? parseInt(countMatch[1], 10) : 0
+      if (count > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${count} bicycle spaces for employees.` },
+        })
+        continue
+      }
+    }
+
     // Not achieved with zero score = not targeted; skip AI generation
     if (credit.creditStatus === 'N' && credit.creditScore === 0) {
       await prisma.credit.update({
@@ -484,53 +547,15 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       continue
     }
 
-    // Transport 1.1: extract residential bicycle count — show comment even if not achieved
-    if (/^transport\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
-      const raw = credit.rawDataPoints ?? ''
-      const countMatch =
-        raw.match(/(\d+)\s*(?:secure\s+)?(?:resident(?:ial)?\s+)?bicycle\s+spaces?\s+(?:for\s+)?residents/i) ??
-        raw.match(/resident(?:ial)?\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
-        raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
-        raw.match(/how many[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
-        raw.match(/(\d+)\s*resident(?:ial)?\s+bicycle/i)
-      const count = countMatch ? parseInt(countMatch[1], 10) : 0
-      if (count > 0) {
-        await prisma.credit.update({
-          where: { id: credit.id },
-          data: { commentsGIW: `${count} secure bicycle spaces for residents.` },
-        })
-        continue
-      }
-    }
-
-    // Transport 1.2: extract residential visitor bicycle count — show comment even if not achieved
-    if (/^transport\s+1\.2$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
-      const raw = credit.rawDataPoints ?? ''
-      const countMatch =
-        raw.match(/(\d+)\s*residential\s+visitor\s+bicycle/i) ??
-        raw.match(/(\d+)\s*visitor\s+bicycle[^.\n]*?resident/i) ??
-        raw.match(/residential\s+visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
-        raw.match(/how many[^?]*visitor[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
-        raw.match(/(\d+)\s*short[- ]?stay\s+bicycle/i)
-      const count = countMatch ? parseInt(countMatch[1], 10) : 0
-      if (count > 0) {
-        await prisma.credit.update({
-          where: { id: credit.id },
-          data: { commentsGIW: `${count} bicycle spaces for residential visitors.` },
-        })
-        continue
-      }
-    }
-
     // Urban Ecology 1.1: extract communal open space area
     if (/^urban\s+ecology\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       const raw = credit.rawDataPoints ?? ''
       const areaMatch =
+        raw.match(/minimum\s+common\s+space\s+required[^:\n]*:\s*([\d,]+)/i) ??
         raw.match(/total\s+(?:area\s+of\s+)?communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
         raw.match(/communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
-        raw.match(/communal\s+space[^:\n]*:\s*([\d,]+)/i) ??
         raw.match(/([\d,]+)\s*m2?\s+(?:of\s+)?communal/i) ??
-        raw.match(/communal[^:\n]*:\s*([\d,]+)\s*m2?/i)
+        raw.match(/communal[^:\n]*:\s*([\d,]+)\s*m2/i)
       const area = areaMatch ? areaMatch[1].replace(/,/g, '') : null
       if (area) {
         await prisma.credit.update({
@@ -915,8 +940,8 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
     data: { hiddenFromPortal: false },
   })
 
-  // Transport 1.1 and 1.2: always show in the reviewer portal when bicycle counts > 0,
-  // even if the credit is not achieved (the comment was filled above only when count > 0)
+  // Transport 1.1–1.4: always show in the reviewer portal when a comment was generated,
+  // even if the credit is not achieved
   await prisma.credit.updateMany({
     where: {
       projectId,
@@ -924,6 +949,8 @@ export async function applyAutoVisibilityRules(projectId: string): Promise<void>
       OR: [
         { creditId: { equals: 'Transport 1.1', mode: 'insensitive' } },
         { creditId: { equals: 'Transport 1.2', mode: 'insensitive' } },
+        { creditId: { equals: 'Transport 1.3', mode: 'insensitive' } },
+        { creditId: { equals: 'Transport 1.4', mode: 'insensitive' } },
       ],
       commentsGIW: { not: null },
     },

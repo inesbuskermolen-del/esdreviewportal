@@ -766,9 +766,8 @@ function detectNonResidential(credits: ReportCreditData[], typology: string | nu
   // Use OE 2.x first (dwelling mix profile), fall back to all credits
   const oe2Raw = credits.filter(c => /^oe\s*2/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
   const searchRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
-  // Use specific area/tenancy patterns to avoid false positives from "home office", transport data, etc.
-  const rawHasRetail = /retail\s+(?:tenanci|area|floor|space|m2|sqm)|(?:tenanci|area|floor|space|m2|sqm)[^.\n]*retail|\bretail\s+\d|\d[^.\n]*\bretail\b/i.test(searchRaw)
-  const rawHasCommercial = /(?:commercial|office)\s+(?:tenanci|area|floor|space|m2|sqm)|(?:tenanci|area|floor|space|m2|sqm)[^.\n]*(?:commercial|office)|\bcommercial\s+\d|\d[^.\n]*\b(?:commercial)\b/i.test(searchRaw)
+  const rawHasRetail = /\bshop\b/i.test(searchRaw)
+  const rawHasCommercial = /\boffice\b/i.test(searchRaw)
   console.log('[report] detectNonResidential: typology=', t, 'hasRetail=', rawHasRetail, 'hasCommercial=', rawHasCommercial)
   console.log('[report] detectNonResidential: OE2 raw (first 300):', oe2Raw.slice(0, 300))
   if (t === 'non-residential') return { hasRetail: rawHasRetail, hasCommercial: rawHasCommercial || !rawHasRetail }
@@ -2804,6 +2803,9 @@ async function fillExcelResidential(
     console.log('[excel] D7 OE2 raw (first 500):', searchRaw.slice(0, 500))
     const totalAreaMatch = searchRaw.match(/\btotal\b[^\n]*?\b(\d[\d,]*(?:\.\d+)?)\s*m[²2]/i)
       ?? searchRaw.match(/\btotal\b[^\n]*?(\d[\d,]*(?:\.\d+)?)\s*(?:sqm|sq\.?m)/i)
+      ?? searchRaw.match(/\btotal\s+floor\s+area[^\n]*\n\s*([\d,]+(?:\.\d+)?)/i)
+      ?? searchRaw.match(/\btotal\b[^\n]*\n\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i)
+      ?? searchRaw.match(/\btotal\b[^\n]*\n\s*([\d,]+(?:\.\d+)?)/i)
     const totalCount = project.totalDwellings ?? getTotalApartments(credits)
     console.log('[excel] D7 totalAreaMatch:', totalAreaMatch?.[1], '  totalCount:', totalCount)
     if (totalAreaMatch && totalCount && totalCount > 0) {
@@ -2819,16 +2821,14 @@ async function fillExcelResidential(
     const allRaw = oe2Raw || credits.map(c => c.rawDataPoints ?? '').join('\n')
     console.log('[excel] D8/D9 OE2 raw (first 500):', allRaw.slice(0, 500))
     const retailArea = extractNumber(allRaw, [
-      /total\s+(?:retail\s+)?area[^:\n]*retail[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
-      /retail[^:\n]*total\s+area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
-      /total\s+retail\s+(?:floor\s+)?area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
-      /retail[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i,
+      /\bshop\b[^\n]*\n\s*([\d,]+(?:\.\d+)?)/i,
+      /\bshop\b[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]?/i,
+      /total\s+shop\s+(?:floor\s+)?area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
     ])
     const officeArea = extractNumber(allRaw, [
-      /total\s+(?:office\s+)?area[^:\n]*office[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
-      /office[^:\n]*total\s+area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
+      /\boffice\b[^\n]*\n\s*([\d,]+(?:\.\d+)?)/i,
+      /\boffice\b[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]?/i,
       /total\s+office\s+(?:floor\s+)?area[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i,
-      /office[^:\n]*:\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i,
     ])
     console.log('[excel] D8 retailArea:', retailArea, '  D9 officeArea:', officeArea)
     if (retailArea != null) ws = patchCell(ws, 'D8', retailArea)
@@ -2851,16 +2851,20 @@ async function fillExcelResidential(
     const energyRaw = `${oe11Raw}\n${oe12Raw}`
     console.log('[excel] D24/D25 OE1.1+1.2 raw (first 500):', energyRaw.slice(0, 500))
     const heating = extractNumber(energyRaw, [
-      /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
-      /annual\s+energy\s+loads?\s*[-–]\s*heat[^:]*:\s*([\d.,]+)/i,
+      /nathers\s+annual\s+energy\s+loads?\s*[-–—]\s*heat[^:\n]*:\s*([\d.,]+)/i,
+      /nathers\s+annual\s+energy\s+loads?\s*[-–—]\s*heat[^\n]*\n\s*([\d.,]+)/i,
+      /annual\s+energy\s+loads?\s*[-–—]\s*heat[^:\n]*:\s*([\d.,]+)/i,
+      /annual\s+energy\s+loads?\s*[-–—]\s*heat[^\n]*\n\s*([\d.,]+)/i,
       /heating\s+\(mj[^)]*\)[^:]*:\s*([\d.,]+)/i,
       /heating[^:]*:\s*([\d.,]+)\s*mj/i,
       /heating load[^:]*:\s*([\d.,]+)/i,
       /(?:total\s+)?heating[^:\n]*:\s*([\d.,]+)/i,
     ])
     const cooling = extractNumber(energyRaw, [
-      /nathers\s+annual\s+energy\s+loads?\s*[-–]\s*cool[^:]*:\s*([\d.,]+)/i,
-      /annual\s+energy\s+loads?\s*[-–]\s*cool[^:]*:\s*([\d.,]+)/i,
+      /nathers\s+annual\s+energy\s+loads?\s*[-–—]\s*cool[^:\n]*:\s*([\d.,]+)/i,
+      /nathers\s+annual\s+energy\s+loads?\s*[-–—]\s*cool[^\n]*\n\s*([\d.,]+)/i,
+      /annual\s+energy\s+loads?\s*[-–—]\s*cool[^:\n]*:\s*([\d.,]+)/i,
+      /annual\s+energy\s+loads?\s*[-–—]\s*cool[^\n]*\n\s*([\d.,]+)/i,
       /cooling\s+\(mj[^)]*\)[^:]*:\s*([\d.,]+)/i,
       /cooling[^:]*:\s*([\d.,]+)\s*mj/i,
       /cooling load[^:]*:\s*([\d.,]+)/i,
