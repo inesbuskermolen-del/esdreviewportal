@@ -428,6 +428,26 @@ ${trimmedText}`
   })
   await prisma.credit.createMany({ data: creditData })
 
+  /* Ensure OE 4.2 always exists — may be Disabled in BESS (excluded from credits array by AI) */
+  const hasOE42 = creditData.some(c => c.creditId.toLowerCase() === 'oe 4.2')
+  if (!hasOE42) {
+    const oeCredit = creditData.find(c => c.creditId.toLowerCase().startsWith('oe'))
+    await prisma.credit.create({
+      data: {
+        projectId,
+        creditId: 'OE 4.2',
+        creditName: 'On-site Renewable Energy',
+        category: oeCredit?.category ?? 'Operational Energy',
+        categoryOrder: 3,
+        creditStatus: 'N',
+        creditScore: 0,
+        mandatory: false,
+        responsibleParty: 'Developer / Architect / Services',
+        hiddenFromPortal: true,
+      },
+    })
+  }
+
   /* Create drawing requirements */
   const DRAWING_EXCLUDED_CREDITS = new Set(['ieq 1.1', 'ieq 1.2', 'ieq 2.1', 'ieq 3.1', 'management 2.3', 'iwm 2.1'])
   const achievedCreditIds = new Set(
