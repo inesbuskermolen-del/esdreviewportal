@@ -1432,7 +1432,6 @@ function AdminExcellenceSection({ items, localFlags, flagging, onFlag, onDelete,
       const ob = getCategoryOrder(b.creditReference)
       return oa !== ob ? oa - ob : a.creditReference.localeCompare(b.creditReference)
     })
-    .filter((item, idx, arr) => arr.findIndex(x => x.creditReference === item.creditReference) === idx)
 
   const innovationItems = [...items.filter(i => i.creditReference === 'Innovation')]
     .sort((a, b) => a.creditName.localeCompare(b.creditName))
