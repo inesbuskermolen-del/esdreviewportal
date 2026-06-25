@@ -672,7 +672,6 @@ export async function generateExcellenceOpportunities(projectId: string): Promis
     const id = c.creditId.toLowerCase().trim()
     if (c.creditStatus === 'ScopedOut') return false
     if (c.creditScore != null && c.creditScore >= 100) return false
-    if (c.creditScore === 0) return false
     if (EXCELLENCE_EXCLUDED.some((ex) => id === ex || id.startsWith(ex + ' ') || c.category.toLowerCase().includes('innovation'))) return false
     return true
   })
