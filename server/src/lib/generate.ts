@@ -301,8 +301,12 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         raw.match(/(\d+)\s*(?:secure\s+)?(?:resident(?:ial)?\s+)?bicycle\s+spaces?\s+(?:for\s+)?residents/i) ??
         raw.match(/resident(?:ial)?\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
         raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
+        raw.match(/long[- ]?stay\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/long[- ]?stay[^:\n]*?:\s*(\d+)/i) ??
         raw.match(/how many[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
-        raw.match(/(\d+)\s*resident(?:ial)?\s+bicycle/i)
+        raw.match(/(\d+)\s*resident(?:ial)?\s+bicycle/i) ??
+        raw.match(/provided[^:\n\d]*(\d+)\s*long[- ]?stay/i) ??
+        raw.match(/(\d+)\s*long[- ]?stay/i)
       const count = countMatch ? parseInt(countMatch[1], 10) : 0
       if (count > 0) {
         await prisma.credit.update({
@@ -319,8 +323,13 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         raw.match(/(\d+)\s*residential\s+visitor\s+bicycle/i) ??
         raw.match(/(\d+)\s*visitor\s+bicycle[^.\n]*?resident/i) ??
         raw.match(/residential\s+visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/short[- ]?stay\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+        raw.match(/short[- ]?stay[^:\n]*?:\s*(\d+)/i) ??
         raw.match(/how many[^?]*visitor[^?]*bicycle[^?]*\?[^:\n]*:\s*(\d+)/i) ??
-        raw.match(/(\d+)\s*short[- ]?stay\s+bicycle/i)
+        raw.match(/(\d+)\s*short[- ]?stay\s+bicycle/i) ??
+        raw.match(/provided[^:\n\d]*(\d+)\s*short[- ]?stay/i) ??
+        raw.match(/(\d+)\s*short[- ]?stay/i)
       const count = countMatch ? parseInt(countMatch[1], 10) : 0
       if (count > 0) {
         await prisma.credit.update({
@@ -552,10 +561,14 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       const raw = credit.rawDataPoints ?? ''
       const areaMatch =
         raw.match(/minimum\s+common\s+space\s+required[^:\n]*:\s*([\d,]+)/i) ??
+        raw.match(/(?:minimum|required|min\.?)\s+(?:communal|common)[^:\n]*:\s*([\d,]+)/i) ??
         raw.match(/total\s+(?:area\s+of\s+)?communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
         raw.match(/communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
-        raw.match(/([\d,]+)\s*m2?\s+(?:of\s+)?communal/i) ??
-        raw.match(/communal[^:\n]*:\s*([\d,]+)\s*m2/i)
+        raw.match(/communal\s+(?:open\s+)?space[^:\n]*:\s*([\d,]+)/i) ??
+        raw.match(/common\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
+        raw.match(/([\d,]+)\s*m[²2]?\s*(?:of\s+)?communal/i) ??
+        raw.match(/([\d,]+)\s*m[²2]?\s*(?:of\s+)?common\s+(?:open\s+)?space/i) ??
+        raw.match(/communal[^:\n]*:\s*([\d,]+)/i)
       const area = areaMatch ? areaMatch[1].replace(/,/g, '') : null
       if (area) {
         await prisma.credit.update({
