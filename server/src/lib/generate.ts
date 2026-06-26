@@ -298,6 +298,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     if (/^transport\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       const raw = credit.rawDataPoints ?? ''
       const countMatch =
+        raw.match(/bicycle\s+spaces?\s+provided[^:\n]*?:\s*(\d+)/i) ??
         raw.match(/(\d+)\s*(?:secure\s+)?(?:resident(?:ial)?\s+)?bicycle\s+spaces?\s+(?:for\s+)?residents/i) ??
         raw.match(/resident(?:ial)?\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
         raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
@@ -320,6 +321,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     if (/^transport\s+1\.2$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       const raw = credit.rawDataPoints ?? ''
       const countMatch =
+        raw.match(/visitor\s+bicycle\s+spaces?\s+provided[^:\n]*?:\s*(\d+)/i) ??
         raw.match(/(\d+)\s*residential\s+visitor\s+bicycle/i) ??
         raw.match(/(\d+)\s*visitor\s+bicycle[^.\n]*?resident/i) ??
         raw.match(/residential\s+visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
