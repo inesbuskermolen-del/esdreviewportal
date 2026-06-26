@@ -343,7 +343,7 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     if (/^transport\s+1\.3$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
       await prisma.credit.update({
         where: { id: credit.id },
-        data: { commentsGIW: 'The majority of the residential bicycle parking spaces are located at ground or entry level.' },
+        data: { commentsGIW: credit.creditStatus === 'N' ? 'Not targeted.' : 'The majority of the residential bicycle parking spaces are located at ground or entry level.' },
       })
       continue
     }
