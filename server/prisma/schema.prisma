@@ -53,6 +53,7 @@ model Credit {
   commentsGIW        String?
   scopedOutReason    String?
   rawDataPoints      String?
+  parsedValues       Json?
   lastEditedBy       String?
   lastEditedAt       DateTime?
   deletedByGIW       Boolean  @default(false)

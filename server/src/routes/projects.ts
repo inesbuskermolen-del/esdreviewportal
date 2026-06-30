@@ -798,7 +798,7 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
       where: { projectId: req.params.id, deletedByGIW: false },
       select: {
         creditId: true, creditName: true, creditStatus: true,
-        rawDataPoints: true, category: true, commentsGIW: true,
+        rawDataPoints: true, parsedValues: true, category: true, commentsGIW: true,
         comments: { select: { commentText: true } },
       },
     })
@@ -807,6 +807,7 @@ router.post('/:id/report', requireGIW, async (req: Request, res: Response): Prom
       creditName: c.creditName,
       creditStatus: c.creditStatus,
       rawDataPoints: c.rawDataPoints,
+      parsedValues: c.parsedValues as Record<string, string> | null,
       category: c.category,
       commentsGIW: c.commentsGIW,
       reviewerComments: c.comments.map(cm => cm.commentText),

@@ -290,6 +290,184 @@ function stripAILeakage(raw: string): string {
   return text
 }
 
+function extractCreditValues(creditId: string, raw: string): Record<string, string> {
+  const id = creditId.toLowerCase().replace(/\s+/g, ' ').trim()
+  const v: Record<string, string> = {}
+
+  if (id === 'iwm 1.1') {
+    const shower = raw.match(/shower(?:head)?[^:\n]*:\s*(\d)\s*star/i) ?? raw.match(/(\d)\s*star[^,\n]*shower(?:head)?/i)
+    if (shower) v.welsShower = shower[1]
+    const kitchenTap = raw.match(/kitchen\s+tap[^:\n]*:\s*(\d)\s*star/i) ?? raw.match(/(\d)\s*star[^,\n]*kitchen\s+tap/i)
+    if (kitchenTap) v.welsKitchenTap = kitchenTap[1]
+    const bathroomTap = raw.match(/bathroom\s+tap[^:\n]*:\s*(\d)\s*star/i) ?? raw.match(/(\d)\s*star[^,\n]*bathroom\s+tap/i)
+    if (bathroomTap) v.welsBathroomTap = bathroomTap[1]
+    if (!kitchenTap && !bathroomTap) {
+      const tap = raw.match(/\btap[^:\n]*:\s*(\d)\s*star/i) ?? raw.match(/(\d)\s*star[^,\n]*\btap\b/i)
+      if (tap) v.welsTap = tap[1]
+    }
+    const toilet = raw.match(/(?:toilet|wc)[^:\n]*:\s*(\d)\s*star/i) ?? raw.match(/(\d)\s*star[^,\n]*(?:toilet|wc)\b/i)
+    if (toilet) v.welsToilet = toilet[1]
+    const dishwasher = raw.match(/dishwasher[^:\n]*:\s*(\d)\s*star/i) ?? raw.match(/(\d)\s*star[^,\n]*dishwasher/i)
+    if (dishwasher) v.welsDishwasher = dishwasher[1]
+  }
+
+  if (id === 'oe 3.1' || id === 'oe 3.2') {
+    const hw = raw.match(/type\s+of\s+hot\s+water\s+system[^:\n]*:\s*(.+)/i) ?? raw.match(/hot\s+water\s+system\s+type[^:\n]*:\s*(.+)/i)
+    if (hw) v.hotWaterSystem = hw[1].trim()
+  }
+
+  if (/^oe\s+2\.[1267]$/.test(id)) {
+    const retCount = raw.match(/retail[^:\n]*:\s*(\d+)\s*tenanc/i) ?? raw.match(/(\d+)\s*retail\s+tenanc/i)
+    if (retCount) v.retailTenancies = retCount[1]
+    const retArea = raw.match(/retail[^,\n]*,\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i)
+    if (retArea) v.retailAreaM2 = retArea[1].replace(/,/g, '')
+    const offCount = raw.match(/office[^:\n]*:\s*(\d+)\s*tenanc/i) ?? raw.match(/(\d+)\s*office\s+tenanc/i)
+    if (offCount) v.officeTenancies = offCount[1]
+    const offArea = raw.match(/office[^,\n]*,\s*([\d,]+(?:\.\d+)?)\s*m[²2]/i)
+    if (offArea) v.officeAreaM2 = offArea[1].replace(/,/g, '')
+    const town = raw.match(/townhouse[^:\n]*:\s*(\d+)/i) ?? raw.match(/(\d+)\s*townhouse/i)
+    if (town) v.totalTownhouses = town[1]
+  }
+
+  if (/^oe\s+4\.[25]$/.test(id)) {
+    const kw = raw.match(/system\s+size[^:\n]*:\s*([\d.]+)\s*k[wW]?[ph]?/i) ??
+      raw.match(/total\s+(?:size|capacity)[^:\n]*:\s*([\d.]+)\s*k[wW]/i) ??
+      raw.match(/([\d.]+)\s*k[wW][ph]?\s+solar/i) ??
+      raw.match(/solar[^:\n]*:\s*([\d.]+)\s*k[wW]/i)
+    if (kw) v.solarKw = kw[1]
+  }
+
+  if (id === 'oe 1.2') {
+    const stars = raw.match(/average[^:\n]*:\s*(\d+(?:\.\d+)?)\s*star/i) ??
+      raw.match(/(\d+(?:\.\d+)?)\s*stars?\s*average/i) ??
+      raw.match(/average\s*(?:star\s*)?rating[^:\n]*:\s*(\d+(?:\.\d+)?)/i)
+    if (stars) v.nathersAvgStars = stars[1]
+  }
+
+  if (/^oe\s+1\./.test(id)) {
+    const impr = raw.match(/(\d+(?:\.\d+)?)\s*%\s*(?:improvement|above|better)/i) ??
+      raw.match(/improvement[^:\n]*:\s*(\d+(?:\.\d+)?)\s*%/i)
+    if (impr) v.thermalImprovementPct = impr[1]
+  }
+
+  if (id === 'transport 1.1') {
+    const m = raw.match(/bicycle\s+spaces?\s+provided[^:\n]*?:\s*(\d+)/i) ??
+      raw.match(/(\d+)\s*(?:secure\s+)?resident(?:ial)?\s+bicycle/i) ??
+      raw.match(/resident(?:ial)?\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+      raw.match(/(\d+)\s*long[- ]?stay\s+bicycle/i) ??
+      raw.match(/long[- ]?stay[^:\n]*?:\s*(\d+)/i)
+    if (m) v.bikesResidential = m[1]
+  }
+
+  if (id === 'transport 1.2') {
+    const m = raw.match(/visitor\s+bicycle\s+spaces?\s+provided[^:\n]*?:\s*(\d+)/i) ??
+      raw.match(/(\d+)\s*residential\s+visitor\s+bicycle/i) ??
+      raw.match(/short[- ]?stay\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+      raw.match(/(\d+)\s*short[- ]?stay\s+bicycle/i) ??
+      raw.match(/short[- ]?stay[^:\n]*?:\s*(\d+)/i)
+    if (m) v.bikesResidentialVisitor = m[1]
+  }
+
+  if (id === 'transport 1.4') {
+    const m = raw.match(/employee[^:\n]*bicycle[^:\n]*?:\s*(\d+)/i) ??
+      raw.match(/(\d+)\s*bicycle\s+spaces?\s+for\s+employees?/i) ??
+      raw.match(/(\d+)\s*employee[^.\n]*bicycle/i)
+    if (m) v.bikesEmployee = m[1]
+  }
+
+  if (id === 'transport 1.5') {
+    const m = raw.match(/commercial\s+visitor\s+bicycle[^:\n]*?:\s*(\d+)/i) ??
+      raw.match(/(\d+)\s*commercial\s+visitor\s+bicycle/i) ??
+      raw.match(/commercial\s+visitor[^:\n]*?:\s*(\d+)/i)
+    if (m) v.bikesCommercialVisitor = m[1]
+  }
+
+  if (id === 'transport 1.6') {
+    const showers = raw.match(/(\d+)\s*shower/i) ?? raw.match(/shower[^:\n]*:\s*(\d+)/i)
+    if (showers) v.eotShowers = showers[1]
+    const lockers = raw.match(/(\d+)\s*locker/i) ?? raw.match(/locker[^:\n]*:\s*(\d+)/i)
+    if (lockers) v.eotLockers = lockers[1]
+  }
+
+  if (id === 'transport 2.3') {
+    const m = raw.match(/(\d+)\s*motor[- ]?bike/i) ?? raw.match(/motor[- ]?bike[^:\n]*?:\s*(\d+)/i)
+    if (m) v.motorbikes = m[1]
+  }
+
+  if (id === 'ieq 1.1') {
+    const m = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:living|habitable|area|comply|achieve)/i) ??
+      raw.match(/(?:living|habitable|area)[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i)
+    if (m) v.daylightLivingPct = m[1]
+  }
+
+  if (id === 'ieq 1.2') {
+    const m = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:bedroom|comply|achieve)/i) ??
+      raw.match(/bedroom[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i)
+    if (m) v.daylightBedroomsPct = m[1]
+  }
+
+  if (id === 'ieq 1.3') {
+    const win = raw.match(/(\d+)\s*(?:out\s+of|\/)\s*(\d+)[^,.\n]*(?:winter|sunlight|sun)/i) ??
+      raw.match(/(?:winter|sunlight)[^,.\n]*?(\d+)\s*(?:out\s+of|\/)\s*(\d+)/i)
+    if (win) { v.winterSunlightCount = win[1]; v.winterSunlightTotal = win[2] }
+    const ori = raw.match(/(\d+)\s*(?:out\s+of|\/)\s*(\d+)[^,.\n]*(?:orient|solar\s+access)/i) ??
+      raw.match(/(?:orient|solar\s+access)[^,.\n]*?(\d+)\s*(?:out\s+of|\/)\s*(\d+)/i)
+    if (ori) { v.orientationCount = ori[1]; v.orientationTotal = ori[2] }
+  }
+
+  if (id === 'ieq 2.1') {
+    const m = raw.match(/(\d+)\s*(?:out\s+of|\/)\s*(\d+)[^,.\n]*(?:dwelling|apartment|unit)/i) ??
+      raw.match(/(?:dwelling|apartment|unit)[^,.\n]*?(\d+)\s*(?:out\s+of|\/)\s*(\d+)/i)
+    if (m) { v.ventilationCount = m[1]; v.ventilationTotal = m[2] }
+    else {
+      const pct = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:cross[- ]?vent|natural\s+vent)/i) ??
+        raw.match(/(?:cross[- ]?vent|natural\s+vent)[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i)
+      if (pct) v.ventilationPct = pct[1]
+    }
+  }
+
+  if (id === 'ieq 3.5') {
+    const m = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:ceiling\s+fan|tenancies?|area)/i) ??
+      raw.match(/(?:ceiling\s+fan|tenancies?)[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i) ??
+      raw.match(/(\d{1,3}(?:\.\d+)?)\s*%/i)
+    if (m) v.ceilingFansPct = m[1]
+  }
+
+  if (id === 'urban ecology 1.1') {
+    const m = raw.match(/minimum\s+common\s+space\s+required[^:\n]*:\s*([\d,]+)/i) ??
+      raw.match(/(?:minimum|required)\s+(?:communal|common)[^:\n]*:\s*([\d,]+)/i) ??
+      raw.match(/total\s+(?:area\s+of\s+)?communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
+      raw.match(/communal\s+open\s+space[^:\n]*:\s*([\d,]+)/i) ??
+      raw.match(/communal\s+(?:open\s+)?space[^:\n]*:\s*([\d,]+)/i) ??
+      raw.match(/([\d,]+)\s*m[²2]?\s*(?:of\s+)?communal/i)
+    if (m) v.communalAreaM2 = m[1].replace(/,/g, '')
+  }
+
+  if (id === 'urban ecology 2.1') {
+    const m = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%[^,.\n]*(?:vegetation|permeable|green|site)/i) ??
+      raw.match(/(?:vegetation|permeable|green)[^,.\n]*?(\d{1,3}(?:\.\d+)?)\s*%/i)
+    if (m) v.vegetationPct = m[1]
+  }
+
+  if (/^urban\s+ecology\s+3\.[12]$/.test(id)) {
+    const m = raw.match(/([\d,]+(?:\.\d+)?)\s*m[²2][^,.\n]*food\s*production/i) ??
+      raw.match(/food\s*production[^,.\n]*?([\d,]+(?:\.\d+)?)\s*m[²2]/i) ??
+      raw.match(/food\s*(?:production|garden)[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i)
+    if (m) v.foodProductionM2 = m[1].replace(/,/g, '')
+  }
+
+  if (id === 'iwm 2.1') {
+    const collect = raw.match(/collection\s*(?:area)?[^:\n]*:\s*([\d,]+)/i) ??
+      raw.match(/([\d,]+)\s*m[²2][^,.\n]*collection\s*area/i)
+    if (collect) v.rainwaterCollectionM2 = collect[1].replace(/,/g, '')
+    const rg = raw.match(/([\d,]+(?:\.\d+)?)\s*m[²2][^,.\n]*rain\s*garden/i) ??
+      raw.match(/rain\s*garden[^:\n]*:\s*([\d,]+(?:\.\d+)?)/i)
+    if (rg) v.raingardenM2 = rg[1].replace(/,/g, '')
+  }
+
+  return v
+}
+
 export async function generateGIWComments(projectId: string): Promise<void> {
   const credits = await prisma.credit.findMany({
     where: { projectId },
@@ -297,6 +475,14 @@ export async function generateGIWComments(projectId: string): Promise<void> {
   })
 
   for (const credit of credits) {
+    // Extract and store deterministic values from rawDataPoints for use by the report
+    if (credit.rawDataPoints && !credit.category.toLowerCase().includes('innovation')) {
+      const parsed = extractCreditValues(credit.creditId, credit.rawDataPoints)
+      if (Object.keys(parsed).length > 0) {
+        await prisma.credit.update({ where: { id: credit.id }, data: { parsedValues: parsed } })
+      }
+    }
+
     // Manually edited comments are preserved across BESS revisions — never overwrite them
     if (credit.lastEditedBy) continue
 

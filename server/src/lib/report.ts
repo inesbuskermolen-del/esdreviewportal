@@ -79,6 +79,7 @@ export interface ReportCreditData {
   creditName?: string
   creditStatus: string
   rawDataPoints: string | null
+  parsedValues?: Record<string, string> | null
   category: string
   commentsGIW?: string | null
   reviewerComments?: string[]
@@ -362,9 +363,130 @@ async function getWordFillData(
   docParagraphs: string[],
   criteriaNames: string[],
 ): Promise<FillData> {
-  // Credits with data points — used for placeholder filling
+  // ── Pre-fill namedValues from parsedValues stored during GIW generation ──────
+  const pv = (creditId: string): Record<string, string> => {
+    const c = credits.find(c => c.creditId.toLowerCase().replace(/\s+/g, ' ').trim() === creditId)
+    return (c?.parsedValues ?? {}) as Record<string, string>
+  }
+  const preFilledValues: Record<string, string> = {}
+  const set = (key: string, val: string | undefined | null) => {
+    if (val != null && val.trim() !== '') preFilledValues[key] = val
+  }
+
+  // IWM 1.1 WELS ratings
+  const iwm11 = pv('iwm 1.1')
+  const tapWELS = iwm11.welsBathroomTap ?? iwm11.welsTap
+  set('toilet WELS', iwm11.welsToilet)
+  set('Toilet WELS', iwm11.welsToilet)
+  set('taps WELS', tapWELS)
+  set('Taps WELS', tapWELS)
+  set('tap WELS', tapWELS)
+  set('shower WELS', iwm11.welsShower)
+  set('Shower WELS', iwm11.welsShower)
+  set('Dishwasher WELS', iwm11.welsDishwasher)
+
+  // OE 3.x hot water
+  const hwSystem = pv('oe 3.1').hotWaterSystem ?? pv('oe 3.2').hotWaterSystem
+  if (hwSystem) {
+    set('Hot water', /^a\s+/i.test(hwSystem) ? hwSystem : `a ${hwSystem.toLowerCase()}`)
+  }
+
+  // OE 2.x retail / office / townhouses
+  const oe2 = ['oe 2.1', 'oe 2.2', 'oe 2.6', 'oe 2.7'].map(id => pv(id)).find(v => Object.keys(v).length > 0) ?? {}
+  set('total retail', oe2.retailTenancies)
+  set('Total Retail', oe2.retailTenancies)
+  set('total office', oe2.officeTenancies)
+  set('Total Office', oe2.officeTenancies)
+  set('total area retail', oe2.retailAreaM2 ? formatNum(oe2.retailAreaM2) : undefined)
+  set('Total area retail', oe2.retailAreaM2 ? formatNum(oe2.retailAreaM2) : undefined)
+  set('total area office', oe2.officeAreaM2 ? formatNum(oe2.officeAreaM2) : undefined)
+  set('Total area office', oe2.officeAreaM2 ? formatNum(oe2.officeAreaM2) : undefined)
+  set('total townhouses', oe2.totalTownhouses)
+
+  // OE 4.x solar PV size (output kWh stays Claude-only)
+  const oe4 = pv('oe 4.2').solarKw ? pv('oe 4.2') : pv('oe 4.5')
+  if (oe4.solarKw) {
+    set('solar PV', `${oe4.solarKw} kW`)
+    set('Solar PV', `${oe4.solarKw} kW`)
+  }
+
+  // OE 1.2 NatHERS stars
+  set('Average star rating', pv('oe 1.2').nathersAvgStars)
+
+  // OE 1.x thermal improvement %
+  const improveRaw = pv('oe 1.1').thermalImprovementPct ?? pv('oe 1.2').thermalImprovementPct
+  if (improveRaw) set('improvement%', `${improveRaw}%`)
+
+  // Transport — bike counts and EOT facilities
+  set('residential bikes', pv('transport 1.1').bikesResidential)
+  set('residential visitor bikes', pv('transport 1.2').bikesResidentialVisitor)
+  set('employee bikes', pv('transport 1.4').bikesEmployee)
+  set('Employee bikes', pv('transport 1.4').bikesEmployee)
+  set('commercial visitor bikes', pv('transport 1.5').bikesCommercialVisitor)
+  set('visitor bikes', pv('transport 1.5').bikesCommercialVisitor)
+  set('EOT showers', pv('transport 1.6').eotShowers)
+  set('EOT lockers', pv('transport 1.6').eotLockers)
+  set('motorbikes', pv('transport 2.3').motorbikes)
+  set('Motorbikes', pv('transport 2.3').motorbikes)
+
+  // IEQ 1.1/1.2 daylight %
+  const dl11 = pv('ieq 1.1').daylightLivingPct
+  if (dl11) set('daylight living', `${dl11}%`)
+  const dl12 = pv('ieq 1.2').daylightBedroomsPct
+  if (dl12) set('daylight bedrooms', `${dl12}%`)
+
+  // IEQ 1.3 winter sunlight and orientation
+  const ieq13 = pv('ieq 1.3')
+  if (ieq13.winterSunlightCount && ieq13.winterSunlightTotal) {
+    const pct = Math.round(parseInt(ieq13.winterSunlightCount) / parseInt(ieq13.winterSunlightTotal) * 100)
+    set('winter sunlight% (XX out of XX)', `${pct}% (${ieq13.winterSunlightCount} out of ${ieq13.winterSunlightTotal})`)
+  }
+  if (ieq13.orientationCount && ieq13.orientationTotal) {
+    const pct = Math.round(parseInt(ieq13.orientationCount) / parseInt(ieq13.orientationTotal) * 100)
+    set('orientation% (XX out of XX)', `${pct}% (${ieq13.orientationCount} out of ${ieq13.orientationTotal})`)
+  }
+
+  // IEQ 2.1 natural ventilation
+  const vent = pv('ieq 2.1')
+  if (vent.ventilationCount && vent.ventilationTotal) {
+    const pct = Math.round(parseInt(vent.ventilationCount) / parseInt(vent.ventilationTotal) * 100)
+    set('natural ventilation% (XX out of XX)', `${pct}% (${vent.ventilationCount} out of ${vent.ventilationTotal})`)
+  } else if (vent.ventilationPct) {
+    set('natural ventilation% (XX out of XX)', `${vent.ventilationPct}%`)
+  }
+
+  // IEQ 3.5 ceiling fans
+  const fansPct = pv('ieq 3.5').ceilingFansPct
+  if (fansPct) { set('fans', fansPct); set('Fans', fansPct) }
+
+  // Urban Ecology 1.1 communal area
+  const communal = pv('urban ecology 1.1').communalAreaM2
+  if (communal) { set('communal area', formatNum(communal)); set('Communal area', formatNum(communal)) }
+
+  // Urban Ecology 2.1 vegetation %
+  const veg = pv('urban ecology 2.1').vegetationPct
+  if (veg) { set('vegetation', veg); set('Vegetation', veg) }
+
+  // Urban Ecology 3.x food production
+  const food = pv('urban ecology 3.1').foodProductionM2 ?? pv('urban ecology 3.2').foodProductionM2
+  if (food) { set('food production area', formatNum(food)); set('Food production', formatNum(food)) }
+
+  // IWM 2.1 rainwater collection area (Blue Factor score stays Claude-only)
+  const collect = pv('iwm 2.1').rainwaterCollectionM2
+  if (collect) set('collection area', formatNum(collect))
+  const raingarden = pv('iwm 2.1').raingardenM2
+  if (raingarden) { set('raingarden size', formatNum(raingarden)); set('raingarden area', formatNum(raingarden)) }
+
+  // Credits with data points — send only credits where Claude extraction is still needed.
+  // Credits with parsedValues are excluded; always include credits where Claude is the sole source.
+  const ALWAYS_IN_SUMMARY = new Set(['oe 4.2', 'oe 4.5', 'ieq 2.3', 'iwm 2.1', 'ieq 1.4', 'ieq 1.5', 'ieq 1.6', 'oe 1.1', 'oe 1.2'])
   const creditSummary = credits
-    .filter(c => c.rawDataPoints)
+    .filter(c => {
+      if (!c.rawDataPoints) return false
+      const id = c.creditId.toLowerCase().replace(/\s+/g, ' ').trim()
+      if (ALWAYS_IN_SUMMARY.has(id)) return true
+      return Object.keys(c.parsedValues ?? {}).length === 0
+    })
     .map(c => `${c.creditId} (${c.creditStatus}): ${c.rawDataPoints}`)
     .join('\n')
 
@@ -406,7 +528,7 @@ ${criteriaNames.join('\n')}
 
 AVAILABLE MELBOURNE COUNCILS (pick the one matching the project address):
 City of Boroondara, City of Yarra, City of Banyule, City of Bass Coast Shire, City of Darebin, City of Greater Dandenong, City of Hobsons Bay, City of Hume, City of Kingston, City of Knox, City of Manningham, City of Maribyrnong, City of Maroondah, City of Moonee Valley, City of Merri-bek, City of Port Phillip, City of Stonnington, City of Whitehorse, City of Whittlesea, City of Wyndham, City of Bayside, City of Brimbank, City of Glen Eira, City of Greater Bendigo, City of Greater Geelong, City of Melbourne, City of Monash, City of Yarra Ranges Shire
-${giwCommentSection}
+
 Return ONLY a valid JSON object with the following exact structure.
 
 For "rowsToDelete": list the EXACT criteria names (from the list above) whose corresponding BESS credit is NOT claimed. A credit is not claimed if its status is "Scoped Out", "Not Achieved", "N/A", or if no matching credit exists in BESS at all. Do NOT include header rows (e.g. "Criteria", "Council Best Practice Standard", "Development Provision") or rows that don't correspond to a specific BESS credit. Use the exact criteria string from the list. IMPORTANT: Never include any Materials criteria (e.g. Embodied Energy, Structural and Reinforcing Steel, Sustainable Timber, PVC, Sustainable Products, Building Re-use) — these rows must always remain in the table.
@@ -503,12 +625,14 @@ Return ONLY the JSON, no explanation.`
     const rawNamed = (typeof parsed.namedValues === 'object' && parsed.namedValues !== null)
       ? parsed.namedValues as Record<string, unknown>
       : {}
-    const namedValues: Record<string, string> = {}
+    const claudeNamedValues: Record<string, string> = {}
     for (const [k, v] of Object.entries(rawNamed)) {
       if (v != null && String(v).trim() !== '' && String(v) !== 'null') {
-        namedValues[k] = String(v)
+        claudeNamedValues[k] = String(v)
       }
     }
+    // Merge: preFilledValues (deterministic DB extractions) override Claude where available
+    const namedValues: Record<string, string> = { ...claudeNamedValues, ...preFilledValues }
     const rawGIW = (typeof parsed.giwCommentFills === 'object' && parsed.giwCommentFills !== null)
       ? parsed.giwCommentFills as Record<string, unknown>
       : {}
