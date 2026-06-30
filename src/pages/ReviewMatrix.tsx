@@ -26,6 +26,18 @@ function getSession(token: string): ReviewerSession | null {
   } catch { return null }
 }
 
+/* ── Reviewer colour palette (mirrors server/src/lib/export.ts REVIEWER_COLORS) ── */
+const REVIEWER_COLORS_HEX = [
+  '#1F5C9E',  // deep blue
+  '#7B2D8B',  // purple
+  '#B35900',  // burnt orange
+  '#1A7A4A',  // forest green
+  '#8B1A1A',  // dark red
+  '#1A6B7A',  // teal
+  '#5C4A1F',  // brown
+  '#3D5C1F',  // olive green
+]
+
 /* ── Helpers ── */
 
 function shortCreditId(id: string): string {
@@ -139,6 +151,11 @@ export default function ReviewMatrix() {
   // Excellence flag state
   const [flagging, setFlagging] = useState<Record<string, boolean>>({})
   const [localFlags, setLocalFlags] = useState<Record<string, string>>({})
+
+  const emailColorMap = useMemo(() => {
+    const emails = [...new Set(credits.flatMap(c => (c.comments ?? []).map(cm => cm.reviewerEmail)))]
+    return new Map(emails.map((email, i) => [email, REVIEWER_COLORS_HEX[i % REVIEWER_COLORS_HEX.length]]))
+  }, [credits])
 
   const interactiveBESS = useMemo(() => {
     if (project?.bessScore == null) return null
@@ -518,6 +535,7 @@ export default function ReviewMatrix() {
                             isGIW={isGIW}
                             gdft={project?.gdft ?? false}
                             currentReviewerEmail={session?.reviewerEmail}
+                            emailColorMap={emailColorMap}
                             giwComment={giwComments[credit.id] ?? ''}
                             onGIWCommentChange={(v) => setGiwComments((p) => ({ ...p, [credit.id]: v }))}
                             onGIWCommentBlur={() => saveGIWComment(credit.id, giwComments[credit.id] ?? '')}
@@ -629,6 +647,7 @@ interface CreditRowProps {
   isGIW: boolean
   gdft: boolean
   currentReviewerEmail?: string
+  emailColorMap: Map<string, string>
   giwComment: string
   onGIWCommentChange: (v: string) => void
   onGIWCommentBlur: () => void
@@ -648,7 +667,7 @@ const tdBase: React.CSSProperties = {
 }
 
 function CreditRow({
-  credit, isGIW, gdft, currentReviewerEmail,
+  credit, isGIW, gdft, currentReviewerEmail, emailColorMap,
   giwComment, onGIWCommentChange, onGIWCommentBlur, isGIWSaved, isGIWError,
   reviewerComment, onReviewerCommentChange, onReviewerCommentBlur,
   isSaving, isSaved, isSaveError,
@@ -656,10 +675,7 @@ function CreditRow({
   const [hovered, setHovered] = useState(false)
   const rowBg = hovered ? '#C8E6D4' : '#fff'
 
-  const teamCommentForGIW = (credit.comments ?? [])
-    .filter(c => c.commentText.trim())
-    .map(c => `${c.commentText.trim()}\n— ${c.reviewerDiscipline}`)
-    .join('\n\n')
+  const teamCommentsForGIW = (credit.comments ?? []).filter(c => c.commentText.trim())
 
   return (
     <tr
@@ -727,7 +743,31 @@ function CreditRow({
       {/* Comments Project Team */}
       <td style={{ ...tdBase }}>
         {isGIW ? (
-          <p style={{ fontSize: '12px', color: '#2C2C2C', margin: 0, whiteSpace: 'pre-wrap' }}>{teamCommentForGIW}</p>
+          <div>
+            {teamCommentsForGIW.map((c, i) => {
+              const color = emailColorMap.get(c.reviewerEmail) ?? '#6B7A3B'
+              const label = c.reviewerName ? `${c.reviewerDiscipline} - ${c.reviewerName}` : c.reviewerDiscipline
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    ...(i > 0 ? { marginTop: '8px' } : {}),
+                    padding: '6px 8px',
+                    backgroundColor: '#F7F5F0',
+                    borderLeft: `3px solid ${color}`,
+                    borderRadius: '2px',
+                  }}
+                >
+                  <p style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '10px', fontWeight: 600, color, margin: '0 0 3px 0' }}>
+                    {label}
+                  </p>
+                  <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#2C2C2C', margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {c.commentText}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
         ) : (
           <div>
             {/* Own comment input */}
@@ -753,23 +793,27 @@ function CreditRow({
             {/* Other reviewers' comments */}
             {(credit.comments ?? [])
               .filter(c => c.reviewerEmail !== currentReviewerEmail && c.commentText.trim())
-              .map(c => (
-                <div
-                  key={c.id}
-                  style={{
-                    marginTop: '8px', padding: '6px 8px',
-                    backgroundColor: '#F7F5F0', borderLeft: '3px solid #6B7A3B',
-                    borderRadius: '2px',
-                  }}
-                >
-                  <p style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '10px', fontWeight: 600, color: '#6B7A3B', margin: '0 0 3px 0' }}>
-                    {c.reviewerDiscipline}
-                  </p>
-                  <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#2C2C2C', margin: 0, whiteSpace: 'pre-wrap' }}>
-                    {c.commentText}
-                  </p>
-                </div>
-              ))
+              .map(c => {
+                const color = emailColorMap.get(c.reviewerEmail) ?? '#6B7A3B'
+                const label = c.reviewerName ? `${c.reviewerDiscipline} - ${c.reviewerName}` : c.reviewerDiscipline
+                return (
+                  <div
+                    key={c.id}
+                    style={{
+                      marginTop: '8px', padding: '6px 8px',
+                      backgroundColor: '#F7F5F0', borderLeft: `3px solid ${color}`,
+                      borderRadius: '2px',
+                    }}
+                  >
+                    <p style={{ fontFamily: 'Montserrat, sans-serif', fontSize: '10px', fontWeight: 600, color, margin: '0 0 3px 0' }}>
+                      {label}
+                    </p>
+                    <p style={{ fontFamily: 'Open Sans, sans-serif', fontSize: '12px', color: '#2C2C2C', margin: 0, whiteSpace: 'pre-wrap' }}>
+                      {c.commentText}
+                    </p>
+                  </div>
+                )
+              })
             }
           </div>
         )}
@@ -954,7 +998,6 @@ function ExcellenceSection({ items, localFlags, flagging, isGIW, session, onFlag
 
   function cardProps(item: ESDExcellenceOpportunity) {
     return {
-      key: item.id,
       item,
       flag: localFlags[item.id] ?? item.flag,
       isFlagging: !!flagging[item.id],

@@ -30,6 +30,7 @@ import {
   applyAutoVisibilityRules,
   INNOVATION_INITIATIVES,
   BLOCKED_INNOVATION_NAMES,
+  INNOVATION_DISCIPLINE,
 } from '../lib/generate'
 import { exportProjectToExcel } from '../lib/export'
 import { generateSMPReport } from '../lib/report'
@@ -979,6 +980,15 @@ router.get('/:id/credits', async (req: Request, res: Response): Promise<void> =>
     // Always apply auto-visibility rules before serving credits
     await applyAutoVisibilityRules(req.params.id).catch(console.error)
 
+    const reviewers = await prisma.reviewer.findMany({
+      where: { projectId: req.params.id },
+      select: { email: true, name: true },
+    })
+    const nameMap = new Map(reviewers.map(r => [r.email, r.name]))
+
+    const annotateComments = <T extends { reviewerEmail: string }>(comments: T[]) =>
+      comments.map(c => ({ ...c, reviewerName: nameMap.get(c.reviewerEmail) ?? null }))
+
     if (giw) {
       const credits = await prisma.credit.findMany({
         where: { projectId: req.params.id, deletedByGIW: false, hiddenFromPortal: false },
@@ -987,7 +997,7 @@ router.get('/:id/credits', async (req: Request, res: Response): Promise<void> =>
           comments: { orderBy: { submittedAt: 'asc' } },
         },
       })
-      res.json(credits)
+      res.json(credits.map(c => ({ ...c, comments: annotateComments(c.comments) })))
       return
     }
 
@@ -1027,7 +1037,7 @@ router.get('/:id/credits', async (req: Request, res: Response): Promise<void> =>
         },
       },
     })
-    res.json(credits)
+    res.json(credits.map(c => ({ ...c, comments: annotateComments(c.comments) })))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to fetch credits' })
@@ -1146,17 +1156,16 @@ router.get('/:id/excellence', async (req: Request, res: Response): Promise<void>
 
     const creditSelect = { id: true, creditId: true, category: true, creditStatus: true, creditWeight: true, creditScore: true } as const
     const allItemsSelect = { flag: true, creditReference: true, bessPoints: true, creditId: true, currentScore: true } as const
-    const [items, weightCredits, allCredits, allItems, projectRow, reviewerNoteRows] = await Promise.all([
+    const [linkedItems, innovationItems, weightCredits, allCredits, allItems, projectRow, reviewerNoteRows] = await Promise.all([
+      // Excellence items tied to discipline-matching credits (non-innovation)
       prisma.eSDExcellenceOpportunity.findMany({
-        where: {
-          projectId: req.params.id,
-          deletedByGIW: false,
-          OR: [
-            { creditId: { in: creditIds } },
-            { creditReference: 'Innovation' },
-          ],
-        },
+        where: { projectId: req.params.id, deletedByGIW: false, creditId: { in: creditIds } },
         orderBy: { creditReference: 'asc' },
+      }),
+      // Innovation items — filtered in memory by discipline
+      prisma.eSDExcellenceOpportunity.findMany({
+        where: { projectId: req.params.id, deletedByGIW: false, creditReference: 'Innovation' },
+        orderBy: { creditName: 'asc' },
       }),
       prisma.credit.findMany({ where: { projectId: req.params.id, deletedByGIW: false, creditId: { not: 'Innovation' }, OR: [{ hiddenFromPortal: false }, { category: { contains: 'innovation', mode: 'insensitive' } }] }, select: creditSelect }),
       prisma.credit.findMany({ where: { projectId: req.params.id, deletedByGIW: false }, select: creditSelect }),
@@ -1167,6 +1176,16 @@ router.get('/:id/excellence', async (req: Request, res: Response): Promise<void>
         select: { excellenceId: true, notes: true },
       }),
     ])
+
+    // Filter innovation items: show only those whose discipline matches the reviewer's search term.
+    // Falls back to 'Architect / Developer' for any item not in the map.
+    const filteredInnovation = innovationItems.filter(item => {
+      if (!searchTerm) return true
+      const disc = INNOVATION_DISCIPLINE[item.creditName.toLowerCase()] ?? 'Architect / Developer'
+      return disc.toLowerCase().includes(searchTerm.toLowerCase())
+    })
+    const items = [...linkedItems, ...filteredInnovation]
+
     const reviewerNotesMap = Object.fromEntries(reviewerNoteRows.map(r => [r.excellenceId, r.notes]))
     const filteredWithPoints = computeItemsBessPoints(items, weightCredits, allCredits)
       .map(item => ({ ...item, reviewerNotes: reviewerNotesMap[item.id] ?? null }))

@@ -1287,6 +1287,39 @@ function deleteTableRows(xml: string, criteriaToDelete: string[]): string {
   return result
 }
 
+/**
+ * Reassign unique sequential IDs to every bookmarkStart/bookmarkEnd element so that
+ * row-cloning operations (syncInnovationTable, buildTableRow, etc.) don't leave
+ * duplicate w:id values that cause Word to silently drop bookmarks.
+ */
+function renumberBookmarks(xml: string): string {
+  const idMap = new Map<string, string>()
+  let counter = 0
+
+  // First pass: collect IDs from bookmarkStart elements in document order
+  const startRe = /<w:bookmarkStart\b[^>]*>/g
+  let m: RegExpExecArray | null
+  while ((m = startRe.exec(xml)) !== null) {
+    const id = (m[0].match(/\bw:id="(\d+)"/) ?? [])[1]
+    if (id !== undefined && !idMap.has(id)) idMap.set(id, String(counter++))
+  }
+
+  // Collect IDs from orphaned bookmarkEnd elements not paired with a start
+  const endRe = /<w:bookmarkEnd\b[^>]*>/g
+  while ((m = endRe.exec(xml)) !== null) {
+    const id = (m[0].match(/\bw:id="(\d+)"/) ?? [])[1]
+    if (id !== undefined && !idMap.has(id)) idMap.set(id, String(counter++))
+  }
+
+  return xml
+    .replace(/<w:bookmarkStart\b[^>]*>/g, (tag: string) =>
+      tag.replace(/\bw:id="(\d+)"/, (_: string, id: string) => `w:id="${idMap.get(id) ?? id}"`),
+    )
+    .replace(/<w:bookmarkEnd\b[^>]*>/g, (tag: string) =>
+      tag.replace(/\bw:id="(\d+)"/, (_: string, id: string) => `w:id="${idMap.get(id) ?? id}"`),
+    )
+}
+
 // ─── Innovation table helpers ─────────────────────────────────────────────────
 
 /**
@@ -1823,7 +1856,8 @@ async function fillWordTemplate(
         }
       }
       if (!namedValues['collection area']) {
-        const m = workingText.match(/collection\s+area[^:\n]*:\s*([\d,]+)/i) ??
+        const m = workingText.match(/what\s+is\s+the\s+total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\?[^\n]*\n[^\n]*rainwater\s+tank\s*1[^\d\n]*(\d[\d,]*)/i) ??
+                  workingText.match(/collection\s+area[^:\n]*:\s*([\d,]+)/i) ??
                   workingText.match(/catchment\s+area[^:\n]*:\s*([\d,]+)/i) ??
                   workingText.match(/roof\s+area[^:\n]*:\s*([\d,]+)/i) ??
                   workingText.match(/([\d,]+)\s*m[²2]\s*(?:roof|collect|catch)/i)
@@ -1850,7 +1884,8 @@ async function fillWordTemplate(
   if (!namedValues['collection area']) {
     const iwmRaw = credits.filter(c => /^iwm/i.test(c.creditId)).map(c => c.rawDataPoints ?? '').join('\n')
     console.log('[report] Collection area fallback — IWM raw (first 300):', iwmRaw.slice(0, 300))
-    const m = iwmRaw.match(/total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\??\s*:\s*([\d,]+)/i) ??
+    const m = iwmRaw.match(/what\s+is\s+the\s+total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\?[^\n]*\n[^\n]*rainwater\s+tank\s*1[^\d\n]*(\d[\d,]*)/i) ??
+              iwmRaw.match(/total\s+roof\s+area\s+connected\s+to\s+the\s+rainwater\s+tank\??\s*:\s*([\d,]+)/i) ??
               iwmRaw.match(/what\s+is\s+the\s+total\s+roof\s+area[^:\n]*:\s*([\d,]+)/i) ??
               iwmRaw.match(/roof\s+area\s+connected[^:\n]*:\s*([\d,]+)/i)
     if (m) {
@@ -1985,14 +2020,17 @@ async function fillWordTemplate(
     }
   }
 
-  // Transport 2.3 only reports achieved/not achieved — hardcode 5 spaces when achieved
-  // Runs outside the transportRaw guard so it fires even when rawDataPoints is empty
+  // Transport 2.3 only reports achieved/not achieved — hardcode 5 spaces when achieved.
+  // Use a negative-match so any status other than the explicit "not achieved" set fills the placeholder.
   if (!namedValues['motorbikes']) {
     const t23 = findCreditLike(credits, 'transport 2.3')
-    if (/^(y|yes|achieved|targeted)$/i.test(t23?.creditStatus ?? '')) {
+    const notAchieved = !t23 ||
+      /^(n|no|not\s+achieved|scoped\s*out|n\/a)$/i.test(t23.creditStatus.trim()) ||
+      t23.creditStatus === 'ScopedOut' || t23.creditStatus === 'Not Achieved' || t23.creditStatus === 'N/A'
+    if (!notAchieved) {
       namedValues['motorbikes'] = '5'
       namedValues['Motorbikes'] = '5'
-      console.log('[report] motorbikes: 5 (Transport 2.3 achieved)')
+      console.log('[report] motorbikes: 5 (Transport 2.3 achieved, status:', t23?.creditStatus, ')')
     }
   }
 
@@ -2461,9 +2499,9 @@ async function fillWordTemplate(
     // Parse table rows: "Question?:    Answer" — check the answer side, not just presence of keywords
     const usedDTS     = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(daylightRaw)
     const usedBuiltIn =
+      /use\s+the\s+built\s+in\s+calculation\s+tools/i.test(daylightRaw) ||
       /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(daylightRaw) ||
-      /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(daylightRaw) ||
-      /use\s+the\s+(?:bess\s+)?built[- ]?in\s+calculation/i.test(daylightRaw)
+      /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(daylightRaw)
 
     // Delete DTS body paragraphs when modelling or built-in calculator was used
     if (!usedDTS) {
@@ -2753,6 +2791,9 @@ async function fillWordTemplate(
 
   // Restore the shielded Key ESD Initiatives table (no-op if error path took rawXml)
   renderedXml = restoreKeyESD(renderedXml)
+
+  // Reassign bookmark IDs so row-cloning doesn't leave duplicates that break Word bookmarks
+  renderedXml = renumberBookmarks(renderedXml)
 
   renderedZip.file('word/document.xml', renderedXml)
   const wordBuf = renderedZip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }) as Buffer

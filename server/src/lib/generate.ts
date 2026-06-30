@@ -207,6 +207,52 @@ export const BLOCKED_INNOVATION_NAMES = new Set([
   'solar pv system',
 ])
 
+/** Maps each innovation initiative name (lower-cased) to its responsible-party discipline string.
+ *  Sourced from Innovation.xlsx. Used to filter which initiatives each reviewer discipline can see. */
+export const INNOVATION_DISCIPLINE: Record<string, string> = {
+  'airtightness testing (sample apartments)':           'Architect / Developer',
+  'airtightness testing (whole building)':              'Architect / Developer',
+  'battery storage':                                    'Services / Architect / Developer',
+  'bicycle repair station':                             'Architect / Developer',
+  'building application':                               'Architect / Developer',
+  'building integrated solar pv':                      'Services / Architect / Developer',
+  'building user engagement':                           'Architect / Developer',
+  'carbon neutral / low carbon concrete':               'Architect / Developer',
+  'carbon neutral power agreement – apartments':  'Architect / Developer',
+  'carbon neutral power agreement – base build':  'Architect / Developer',
+  'centralised hrv/erv system':                        'Services / Architect / Developer',
+  'community development program':                      'Architect / Developer',
+  'composter':                                          'Architect / Developer',
+  'construction waste reduction':                       'Architect / Developer',
+  'demand response systems':                            'Services / Architect / Developer',
+  'design for disassembly plan':                        'Architect / Developer',
+  'electric bike fleet and e-bike charging stations':  'Services / Architect / Developer',
+  'embodied carbon assessment':                         'Architect / Developer',
+  'esd as-built verification':                          'Architect / Developer',
+  'esd display':                                        'Architect / Developer',
+  'formal pre-plaster inspection':                      'Architect / Developer',
+  'geothermal systems':                                 'Services / Architect / Developer',
+  'greenfactor tool and achievement of a 0.55 score':  'Landscape / Architect / Developer',
+  'grey water recycling':                               'Services / Architect / Developer',
+  'heat island effect':                                 'Landscape / Architect / Developer',
+  'ieq sensors':                                        'Services / Architect / Developer',
+  'lca':                                                'Architect / Developer',
+  'low gwp / no refrigerants hhw':                     'Services / Architect / Developer',
+  'low gwp / no refrigerants hvac':                    'Services / Architect / Developer',
+  'material passport':                                  'Architect / Developer',
+  'micro grid':                                         'Services / Architect / Developer',
+  'natural insulation materials':                       'Architect / Developer',
+  'placemaking / flexi-space':                          'Architect / Developer',
+  'recycled/reused/repurposed materials':               'Architect / Developer',
+  'share economy':                                      'Architect / Developer',
+  'smart grid integration':                             'Services / Architect / Developer',
+  'social innovation':                                  'Architect / Developer',
+  'solshare system':                                    'Services / Architect / Developer',
+  'triple glazing':                                     'Architect / Developer',
+  'water leak detection system':                        'Services / Architect / Developer',
+  'zero waste strategy':                                'Architect / Developer',
+}
+
 /* ── GIW Comment Generation ── */
 
 function stripAILeakage(raw: string): string {
@@ -494,9 +540,9 @@ export async function generateGIWComments(projectId: string): Promise<void> {
       // Pathway detection (mirrors report.ts logic)
       const usedDtS = /deemed\s*to\s*satisfy[^:\n]*\?:\s*yes\b/i.test(raw)
       const usedBuiltIn =
+        /use\s+the\s+built\s+in\s+calculation\s+tools/i.test(raw) ||
         /calculation\s+approach[^:\n]*\?:\s*use\s+the\s+built[- ]?in\s+calculation/i.test(raw) ||
-        /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(raw) ||
-        /use\s+the\s+(?:bess\s+)?built[- ]?in\s+calculation/i.test(raw)
+        /approach[^:\n]*daylight[^:\n]*\?:\s*use\s+the\s+built[- ]?in/i.test(raw)
       const usedModelling =
         /calculation\s+approach[^:\n]*\?:\s*provide\s+(?:your|our)\s+own\s+calculations/i.test(raw) ||
         /approach[^:\n]*daylight[^:\n]*\?:\s*provide\s+(?:your|our)\s+own\s+calculations/i.test(raw) ||

@@ -83,6 +83,7 @@ export interface CreditComment {
   projectId: string
   reviewerEmail: string
   reviewerDiscipline: string
+  reviewerName?: string | null
   commentText: string
   submittedAt: string
 }

@@ -88,6 +88,7 @@ async function fetchProject(projectId: string): Promise<{
     comments: Array<{
       reviewerEmail: string
       reviewerDiscipline: string
+      reviewerName: string | null
       commentText: string
     }>
   }>
@@ -111,70 +112,95 @@ async function fetchProject(projectId: string): Promise<{
     bessPoints: string | null
     creditId: string | null
     additionalBessPoints?: number | null
-    notesList: Array<{ reviewerEmail: string; notes: string }>
+    notesList: Array<{ reviewerEmail: string; reviewerName: string | null; reviewerDiscipline: string; notes: string }>
   }>
 }> {
-  return prisma.project.findUniqueOrThrow({
-    where: { id: projectId },
-    select: {
-      id: true,
-      name: true,
-      address: true,
-      date: true,
-      bessScore: true,
-      revision: true,
-      credits: {
-        where: { deletedByGIW: false, hiddenFromPortal: false },
-        orderBy: [{ categoryOrder: 'asc' }, { creditId: 'asc' }],
-        select: {
-          id: true,
-          creditId: true,
-          creditName: true,
-          category: true,
-          categoryOrder: true,
-          creditRequirement: true,
-          mandatory: true,
-          responsibleParty: true,
-          creditStatus: true,
-          creditScore: true,
-          creditWeight: true,
-          commentsGIW: true,
-          comments: {
-            orderBy: { submittedAt: 'asc' },
-            select: { reviewerEmail: true, reviewerDiscipline: true, commentText: true },
+  const [project, reviewers] = await Promise.all([
+    prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        date: true,
+        bessScore: true,
+        revision: true,
+        credits: {
+          where: { deletedByGIW: false, hiddenFromPortal: false },
+          orderBy: [{ categoryOrder: 'asc' }, { creditId: 'asc' }],
+          select: {
+            id: true,
+            creditId: true,
+            creditName: true,
+            category: true,
+            categoryOrder: true,
+            creditRequirement: true,
+            mandatory: true,
+            responsibleParty: true,
+            creditStatus: true,
+            creditScore: true,
+            creditWeight: true,
+            commentsGIW: true,
+            comments: {
+              orderBy: { submittedAt: 'asc' },
+              select: { reviewerEmail: true, reviewerDiscipline: true, commentText: true },
+            },
+          },
+        },
+        drawingItems: {
+          orderBy: { creditReference: 'asc' },
+          select: {
+            creditReference: true,
+            drawingType: true,
+            requirement: true,
+            discipline: true,
+            status: true,
+            notes: true,
+          },
+        },
+        excellenceItems: {
+          where: { deletedByGIW: false },
+          orderBy: { creditReference: 'asc' },
+          select: {
+            id: true,
+            creditReference: true,
+            creditName: true,
+            reviewerNotes: true,
+            currentScore: true,
+            improvementDescription: true,
+            flag: true,
+            flaggedBy: true,
+            bessPoints: true,
+            creditId: true,
+            notesList: { select: { reviewerEmail: true, notes: true } },
           },
         },
       },
-      drawingItems: {
-        orderBy: { creditReference: 'asc' },
-        select: {
-          creditReference: true,
-          drawingType: true,
-          requirement: true,
-          discipline: true,
-          status: true,
-          notes: true,
-        },
-      },
-      excellenceItems: {
-        where: { deletedByGIW: false },
-        orderBy: { creditReference: 'asc' },
-        select: {
-          id: true,
-          creditReference: true,
-          creditName: true,
-          reviewerNotes: true,
-          currentScore: true,
-          improvementDescription: true,
-          flag: true,
-          flaggedBy: true,
-          bessPoints: true,
-          creditId: true,
-          notesList: { select: { reviewerEmail: true, notes: true } },
-        },
-      },
-    },
-  })
+    }),
+    prisma.reviewer.findMany({ where: { projectId }, select: { email: true, name: true, discipline: true } }),
+  ])
+
+  const nameMap = new Map(reviewers.map(r => [r.email, r.name]))
+  const disciplineMap = new Map(reviewers.map(r => [r.email, r.discipline]))
+
+  return {
+    ...project,
+    credits: project.credits.map(c => ({
+      ...c,
+      comments: c.comments.map(cm => ({
+        ...cm,
+        reviewerName: nameMap.get(cm.reviewerEmail) ?? null,
+      })),
+    })),
+    excellenceItems: project.excellenceItems.map(item => ({
+      ...item,
+      notesList: item.notesList.map(n => ({
+        ...n,
+        reviewerName: nameMap.get(n.reviewerEmail) ?? null,
+        reviewerDiscipline: disciplineMap.get(n.reviewerEmail) ?? '',
+      })),
+    })),
+  }
 }
 
 /* ── Reviewer comment colour palette (ARGB, no alpha = FF) ── */
@@ -205,11 +231,11 @@ function autoRowHeight(cells: Array<{ text: string; colWidth: number }>, lineHei
 
 /**
  * Build ExcelJS RichText segments for reviewer comments.
- * Format per comment: `"email": "comment text"` in the reviewer's colour.
+ * Format per comment: `"Discipline - Name: comment text"` in the reviewer's colour.
  * Comments separated by a blank line.
  */
 function buildCommentRichText(
-  comments: Array<{ reviewerEmail: string; reviewerDiscipline: string; commentText: string }>,
+  comments: Array<{ reviewerEmail: string; reviewerDiscipline: string; reviewerName?: string | null; commentText: string }>,
   emailColorMap: Map<string, string>,
 ): ExcelJS.CellRichTextValue {
   const richText: ExcelJS.RichText[] = []
@@ -217,8 +243,11 @@ function buildCommentRichText(
   for (let i = 0; i < filtered.length; i++) {
     const c = filtered[i]
     const argb = emailColorMap.get(c.reviewerEmail) ?? 'FF000000'
-    const label = `"${c.reviewerEmail}": `
-    const body = `"${c.commentText.trim()}"`
+    const displayName = c.reviewerName?.trim()
+      ? `${c.reviewerDiscipline} - ${c.reviewerName.trim()}`
+      : c.reviewerDiscipline
+    const label = `${displayName}: `
+    const body = c.commentText.trim()
     richText.push({
       font: { name: 'Calibri', size: 10, bold: true, color: { argb } },
       text: label,
@@ -455,7 +484,7 @@ function buildReviewMatrixSheet(wb: ExcelJS.Workbook, p: ProjectData, logoBuffer
       // Build rich-text reviewer notes (coloured by reviewer, matching BESS team comments style)
       if (perReviewerNotes.length > 0) {
         row.getCell(6).value = buildCommentRichText(
-          perReviewerNotes.map(n => ({ reviewerEmail: n.reviewerEmail, reviewerDiscipline: '', commentText: n.notes.trim() })),
+          perReviewerNotes.map(n => ({ reviewerEmail: n.reviewerEmail, reviewerDiscipline: n.reviewerDiscipline, reviewerName: n.reviewerName, commentText: n.notes.trim() })),
           emailColorMap,
         )
       } else if (item.reviewerNotes) {
@@ -616,7 +645,7 @@ export async function exportProjectToExcel(projectId: string): Promise<Buffer> {
   workbook.creator = 'GIW Environmental Solutions'
   workbook.created = new Date()
 
-  const logoPath = path.resolve(__dirname, '../../../public/GIW logo.png')
+  const logoPath = path.resolve(__dirname, '../../../public/GIW_logo_horizontal_white.png')
   const logoBuffer = fs.existsSync(logoPath) ? fs.readFileSync(logoPath) : null
 
   buildReviewMatrixSheet(workbook, enrichedProject, logoBuffer, interactiveBESS)
