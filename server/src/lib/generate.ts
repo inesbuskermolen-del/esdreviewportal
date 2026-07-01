@@ -64,7 +64,7 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
     '[XX]% of the bedrooms achieves the BESS best practice requirements.',
   ],
   'ieq 1.3': ['>70% of dwellings receive at least 3 hours of direct sunlight in all Living areas between 9am and 3pm in mid-winter.'],
-  'ieq 1.4': ['The commercial areas are targeting a 2% DF to 33% of the nominated area. This is deemed achievable based on the current design.'],
+  'ieq 1.4': ['The commercial areas are targeting a 2% DF to [XX]% of the nominated area. This is deemed achievable based on the current design.'],
   'ieq 1.5': ['[XX]% of the floor area of the main living areas achieves adequate daylight.'],
   'ieq 1.6': ['[XX]% of the floor area of the secondary habitable rooms achieves adequate daylight.'],
   'ieq 2.1': ['[XX]% of the dwellings is naturally cross-ventilated with windows on opposite or adjacent facades.'],
