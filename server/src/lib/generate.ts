@@ -480,7 +480,6 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     status: string
     score: number | null
     data: string
-    instruction: string
     noTemplate: boolean
   }> = []
 
@@ -890,40 +889,51 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     }
 
     // Needs AI — collect for batch
-    const templateList = templates.length > 0
-      ? templates.map((t, i) => templates.length > 1 ? `Option ${i + 1}:\n${t}` : t).join('\n\n')
-      : null
-    const instruction = templateList
-      ? (templates.length > 1
-          ? `Choose the single most appropriate option and fill its [placeholders] with values from the project data. Output the chosen option text only:\n\n${templateList}`
-          : `Fill every [placeholder] in this template with the matching value from the project data. If a specific value is not in the data, leave the placeholder as-is:\n\n${templateList}`)
-      : 'Write a factual one-line comment. Start with the key fact from the project data. If ScopedOut, briefly note what is outside scope. Max 150 characters.'
-
     batchItems.push({
       dbId: credit.id,
       creditId: credit.creditId,
       status: credit.creditStatus,
       score: credit.creditScore ?? null,
       data: credit.rawDataPoints ?? 'No specific data recorded.',
-      instruction,
       noTemplate: templates.length === 0,
     })
   }
 
   if (batchItems.length > 0) {
+    // Build a minimal template section covering only the credits in this batch.
+    // Templates go in the system prompt (sent once) rather than repeated per-credit.
+    const templateLines: string[] = []
+    const noTemplateCreditIds: string[] = []
+    for (const item of batchItems) {
+      const templates = findTemplates(item.creditId)
+      if (templates.length === 0) {
+        noTemplateCreditIds.push(item.creditId)
+      } else if (templates.length === 1) {
+        templateLines.push(`${item.creditId}:\n${templates[0]}`)
+      } else {
+        const opts = templates.map((t, i) => `Option ${i + 1}:\n${t}`).join('\n\n')
+        templateLines.push(`${item.creditId} (choose one option):\n${opts}`)
+      }
+    }
+
+    const templateSection = templateLines.length > 0
+      ? `Template library (look up by creditId):\n\n${templateLines.join('\n\n')}\n\n`
+      : ''
+    const freeFormNote = noTemplateCreditIds.length > 0
+      ? `Credits with no template (write a factual 1-sentence comment, max 150 chars): ${noTemplateCreditIds.join(', ')}\n\n`
+      : ''
+
+    const systemPrompt = `You are a BESS credit comment completion function.\n\n${templateSection}${freeFormNote}Rules:\n- Fill [XX], [stars], and any [bracketed] placeholders with values from each credit's "data"; leave as-is if not found\n- For multi-option credits: choose the best fitting option, then fill its placeholders\n- No-template credits: start with the key fact; if ScopedOut, note what is out of scope; max 150 chars\n- Zero preamble. Never write "I", "Based on", "Looking at", "Note", "Option N:". Always use "retail" not "shop".\n- Return ONLY a valid JSON object: { "id": "completed comment" }`
+
     const creditsPayload = batchItems.map(item => ({
       id: item.dbId,
       creditId: item.creditId,
       status: item.status,
       score: item.score != null ? `${item.score}%` : 'N/A',
       data: item.data,
-      instruction: item.instruction,
     }))
 
-    const systemPrompt =
-      'You are a text completion function for BESS building assessments. Output ONLY a valid JSON object mapping each "id" to the completed comment string. Zero preamble, zero explanation, zero reasoning. No "Based on", "Looking at", "Note", "I". If filling [placeholders], replace them with values from "data" — leave any unfilled placeholder as-is if the value is not in the data. Always use "retail" instead of "shop". No-template credits must be max 150 characters.'
-
-    const userPrompt = `For each credit below, follow its "instruction" exactly and return a JSON object { "id": "completed comment" }.\n\n${JSON.stringify(creditsPayload, null, 2)}`
+    const userPrompt = `Return a JSON object mapping each credit "id" to its completed comment.\n\n${JSON.stringify(creditsPayload, null, 2)}`
 
     try {
       const message = await anthropic.messages.create({
@@ -1018,29 +1028,32 @@ export async function generateExcellenceOpportunities(projectId: string): Promis
 - Urban Ecology 2.3 Green Wall: This can be creepers, green wall systems or hanging plants cascading down.
 - Innovation 1.1: 1 point per confirmed initiative, 10 points max`
 
-    const eligiblePayload = eligible.map(c => ({
-      id: c.id,
-      creditId: c.creditId,
-      name: c.creditName,
-      score: c.creditScore != null ? `${c.creditScore}%` : 'N/A',
-      maxScore: c.creditId.toLowerCase().trim() === 'ieq 1.4' ? '60%' : '100%',
-      status: c.creditStatus,
-      requirement: c.creditRequirement ?? 'N/A',
-      data: c.rawDataPoints ?? 'No specific data recorded.',
-      instruction: /^iwm\s*1\.1$/i.test(c.creditId.trim())
-        ? '1–3 sentences. Check the data — mention each improvement pathway NOT already in use (higher WELS ratings on fixtures, toilet connection to rainwater/recycled water, landscape irrigation connection to rainwater/recycled water). Do not mention pathways already achieved. Do not mention credit weight.'
-        : '1 sentence under 150 characters. Describe the specific action with the exact threshold or target value. Do not mention current score or credit weight.',
-    }))
+    // Only IWM 1.1 needs rawDataPoints (to identify which WELS pathways are unused).
+    // All other credits are scored deterministically from thresholds — no project data needed.
+    const eligiblePayload = eligible.map(c => {
+      const isIWM11 = /^iwm\s*1\.1$/i.test(c.creditId.trim())
+      return {
+        id: c.id,
+        creditId: c.creditId,
+        name: c.creditName,
+        score: c.creditScore != null ? `${c.creditScore}%` : 'N/A',
+        maxScore: c.creditId.toLowerCase().trim() === 'ieq 1.4' ? '60%' : '100%',
+        status: c.creditStatus,
+        ...(isIWM11 ? { data: c.rawDataPoints ?? 'No specific data recorded.' } : {}),
+      }
+    })
 
-    const systemPrompt =
-      'You are an ESD consultant writing concise improvement notes for a BESS assessment. Be specific — cite actual numbers and thresholds from the data. No generic advice. No AI references. Never mention credit weights. Always use "retail" instead of "shop". Return ONLY a valid JSON object mapping each "id" to the description string.'
-
-    const userPrompt = `Project: ${project.name}${project.address ? `, ${project.address}` : ''}
+    const systemPrompt = `You are an ESD consultant writing concise BESS improvement notes. Be specific — cite actual numbers and thresholds. No generic advice. No AI references. Never mention credit weights. Always use "retail" not "shop".
 
 ${scoreThresholds}
 
-For each credit below, generate the improvement description per its "instruction" field.
-Return a JSON object: { "id": "description" }
+Format:
+- Default: 1 sentence under 150 characters with the exact action and threshold/target. Do not mention current score.
+- IWM 1.1 only: 1–3 sentences. Check "data" — mention each pathway NOT already in use (higher WELS ratings, toilet/landscape connection to rainwater or recycled water). Do not mention pathways already achieved.
+
+Return ONLY valid JSON: { "id": "description" }`
+
+    const userPrompt = `Project: ${project.name}${project.address ? `, ${project.address}` : ''}
 
 ${JSON.stringify(eligiblePayload, null, 2)}`
 
