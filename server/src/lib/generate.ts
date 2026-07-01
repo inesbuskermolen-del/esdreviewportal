@@ -64,7 +64,7 @@ const CREDIT_COMMENT_TEMPLATES: Record<string, string[]> = {
     '[XX]% of the bedrooms achieves the BESS best practice requirements.',
   ],
   'ieq 1.3': ['>70% of dwellings receive at least 3 hours of direct sunlight in all Living areas between 9am and 3pm in mid-winter.'],
-  'ieq 1.4': ['The commercial areas are targeting a 2% DF to [33]% of the nominated area. This is deemed achievable based on the current design.'],
+  'ieq 1.4': ['The commercial areas are targeting a 2% DF to 33% of the nominated area. This is deemed achievable based on the current design.'],
   'ieq 1.5': ['[XX]% of the floor area of the main living areas achieves adequate daylight.'],
   'ieq 1.6': ['[XX]% of the floor area of the secondary habitable rooms achieves adequate daylight.'],
   'ieq 2.1': ['[XX]% of the dwellings is naturally cross-ventilated with windows on opposite or adjacent facades.'],
@@ -474,6 +474,16 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     orderBy: [{ categoryOrder: 'asc' }, { creditId: 'asc' }],
   })
 
+  const batchItems: Array<{
+    dbId: string
+    creditId: string
+    status: string
+    score: number | null
+    data: string
+    instruction: string
+    noTemplate: boolean
+  }> = []
+
   for (const credit of credits) {
     // Extract and store deterministic values from rawDataPoints for use by the report
     if (credit.rawDataPoints && !credit.category.toLowerCase().includes('innovation')) {
@@ -595,6 +605,60 @@ export async function generateGIWComments(projectId: string): Promise<void> {
         await prisma.credit.update({
           where: { id: credit.id },
           data: { commentsGIW: `${count} bicycle spaces for employees.` },
+        })
+        continue
+      }
+    }
+
+    if (/^transport\s+1\.5$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const pv = (credit.parsedValues as Record<string, string> | null) ?? {}
+      const count = parseInt(pv.bikesCommercialVisitor ?? '0', 10)
+      if (count > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${count} bicycle spaces for commercial visitors.` },
+        })
+        continue
+      }
+    }
+
+    if (/^transport\s+1\.6$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const pv = (credit.parsedValues as Record<string, string> | null) ?? {}
+      const s = parseInt(pv.eotShowers ?? '0', 10)
+      const l = parseInt(pv.eotLockers ?? '0', 10)
+      if (s > 0 || l > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${s} showers, ${l} lockers and change facilities are to be provided within the EOT facilities.` },
+        })
+        continue
+      }
+    }
+
+    if (/^transport\s+2\.3$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const pv = (credit.parsedValues as Record<string, string> | null) ?? {}
+      const count = parseInt(pv.motorbikes ?? '0', 10)
+      if (count > 0) {
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: `${count} motor bike spaces are provided within the development.` },
+        })
+        continue
+      }
+    }
+
+    if (/^iwm\s+1\.1$/i.test(credit.creditId.trim()) && credit.creditStatus !== 'ScopedOut') {
+      const pv = (credit.parsedValues as Record<string, string> | null) ?? {}
+      const shower = pv.welsShower
+      const kitchen = pv.welsKitchenTap ?? pv.welsTap
+      const bathroom = pv.welsBathroomTap ?? pv.welsTap
+      const toilet = pv.welsToilet
+      const dishwasher = pv.welsDishwasher
+      if (shower && kitchen && bathroom && toilet && dishwasher) {
+        const comment = `• Showerheads: ${shower} Star WELS\n• Kitchen Taps: ${kitchen} Star WELS\n• Bathroom Taps: ${bathroom} Star WELS\n• Dishwashers: ${dishwasher} Star WELS\n• WC: ${toilet} Star WELS\n• Urinals: Scope out\n• Washing Machine: Occupant to Install`
+        await prisma.credit.update({
+          where: { id: credit.id },
+          data: { commentsGIW: comment },
         })
         continue
       }
@@ -814,84 +878,87 @@ export async function generateGIWComments(projectId: string): Promise<void> {
     }
 
     const templates = findTemplates(credit.creditId)
+    const hasPlaceholders = templates.some(t => /\[[^\]]{1,80}\]/.test(t))
 
-    if (templates.length > 0) {
-      // Check if any template has placeholders that need filling
-      const hasPlaceholders = templates.some(t => /\[[^\]]{1,80}\]/.test(t))
+    if (templates.length > 0 && !hasPlaceholders && templates.length === 1) {
+      // No placeholders, single template — write verbatim, no AI needed
+      await prisma.credit.update({
+        where: { id: credit.id },
+        data: { commentsGIW: templates[0] },
+      })
+      continue
+    }
 
-      if (!hasPlaceholders && templates.length === 1) {
-        // No placeholders, single template — write verbatim, no AI needed
-        await prisma.credit.update({
-          where: { id: credit.id },
-          data: { commentsGIW: templates[0] },
-        })
-        continue
-      }
+    // Needs AI — collect for batch
+    const templateList = templates.length > 0
+      ? templates.map((t, i) => templates.length > 1 ? `Option ${i + 1}:\n${t}` : t).join('\n\n')
+      : null
+    const instruction = templateList
+      ? (templates.length > 1
+          ? `Choose the single most appropriate option and fill its [placeholders] with values from the project data. Output the chosen option text only:\n\n${templateList}`
+          : `Fill every [placeholder] in this template with the matching value from the project data. If a specific value is not in the data, leave the placeholder as-is:\n\n${templateList}`)
+      : 'Write a factual one-line comment. Start with the key fact from the project data. If ScopedOut, briefly note what is outside scope. Max 150 characters.'
 
-      // Template has placeholders or multiple options — use AI to fill/choose
-      const templateList = templates.map((t, i) =>
-        templates.length > 1 ? `Option ${i + 1}:\n${t}` : t,
-      ).join('\n\n')
+    batchItems.push({
+      dbId: credit.id,
+      creditId: credit.creditId,
+      status: credit.creditStatus,
+      score: credit.creditScore ?? null,
+      data: credit.rawDataPoints ?? 'No specific data recorded.',
+      instruction,
+      noTemplate: templates.length === 0,
+    })
+  }
 
-      const systemPrompt =
-        'You are a text completion function. Output ONLY the completed template — nothing else. Zero preamble, zero explanation, zero reasoning, zero trailing notes. Start your response with the exact first character of the chosen template. Never write "I", "Based on", "Looking at", "Note", "Option", or any commentary. If choosing between options, output the chosen option text only, not its label. Always use "retail" instead of "shop".'
+  if (batchItems.length > 0) {
+    const creditsPayload = batchItems.map(item => ({
+      id: item.dbId,
+      creditId: item.creditId,
+      status: item.status,
+      score: item.score != null ? `${item.score}%` : 'N/A',
+      data: item.data,
+      instruction: item.instruction,
+    }))
 
-      const userPrompt = `Project data:\n${credit.rawDataPoints ?? 'No specific data recorded.'}\nStatus: ${credit.creditStatus}   Score: ${credit.creditScore != null ? `${credit.creditScore}%` : 'N/A'}\n\n${templates.length > 1 ? `Choose the single most appropriate option and fill its [placeholders] with values from the project data. Output the chosen option text only:\n\n${templateList}` : `Fill every [placeholder] in this template with the matching value from the project data. If a specific value is not in the data, leave the placeholder as-is:\n\n${templateList}`}`
+    const systemPrompt =
+      'You are a text completion function for BESS building assessments. Output ONLY a valid JSON object mapping each "id" to the completed comment string. Zero preamble, zero explanation, zero reasoning. No "Based on", "Looking at", "Note", "I". If filling [placeholders], replace them with values from "data" — leave any unfilled placeholder as-is if the value is not in the data. Always use "retail" instead of "shop". No-template credits must be max 150 characters.'
 
-      try {
-        const message = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 512,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }],
-        })
+    const userPrompt = `For each credit below, follow its "instruction" exactly and return a JSON object { "id": "completed comment" }.\n\n${JSON.stringify(creditsPayload, null, 2)}`
 
-        const block = message.content[0]
-        if (block.type === 'text') {
-          const text = stripAILeakage(block.text)
-            .replace(/\[[^\]]*[A-Za-z][^\]]*\]/g, '')  // remove letter-containing unfilled placeholders [XX], [value]
-            .replace(/\[\s*[\d.,°%/\s-]*\s*\]/g, '')   // remove numeric/symbol-only brackets [10], [15°]
-            .replace(/\[\s*\]/g, '')                    // remove any remaining empty brackets []
-            .replace(/[ \t]{2,}/g, ' ')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim()
-          await prisma.credit.update({
-            where: { id: credit.id },
-            data: { commentsGIW: text },
-          })
+    try {
+      const message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      })
+
+      console.log(`[generate] GIW batch usage — input: ${message.usage.input_tokens}, output: ${message.usage.output_tokens}`)
+
+      const block = message.content[0]
+      if (block.type === 'text') {
+        const jsonMatch = block.text.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const results: Record<string, string> = JSON.parse(jsonMatch[0])
+          for (const item of batchItems) {
+            const raw = results[item.dbId]
+            if (!raw) continue
+            const text = stripAILeakage(String(raw))
+              .replace(/\[[^\]]*[A-Za-z][^\]]*\]/g, '')
+              .replace(/\[\s*[\d.,°%/\s-]*\s*\]/g, '')
+              .replace(/\[\s*\]/g, '')
+              .replace(/[ \t]{2,}/g, ' ')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim()
+            await prisma.credit.update({
+              where: { id: item.dbId },
+              data: { commentsGIW: item.noTemplate ? text.slice(0, 150) : text },
+            })
+          }
         }
-      } catch (err) {
-        console.error(`[generate] Comment failed for credit ${credit.creditId}:`, err)
       }
-    } else {
-      // No template: write a short factual comment, max 150 characters
-      const systemPrompt =
-        'You are writing a concise factual note for a BESS building assessment. Output only the comment text — no preamble, no reasoning, no first-person, no "Based on", no "Looking at". Start directly with the fact. Maximum 150 characters. Always use "retail" instead of "shop".'
-
-      const userPrompt = `Write a factual one-line comment for this BESS credit. Start with the key fact from the project data.\nStatus: ${credit.creditStatus}   Score: ${credit.creditScore != null ? `${credit.creditScore}%` : 'N/A'}\nProject data: ${credit.rawDataPoints ?? 'No specific data recorded.'}\nIf ScopedOut, briefly note what is outside scope. Max 150 characters.`
-
-      try {
-        const message = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 80,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }],
-        })
-
-        const block = message.content[0]
-        if (block.type === 'text') {
-          const text = stripAILeakage(block.text)
-            .replace(/[ \t]{2,}/g, ' ')
-            .trim()
-            .slice(0, 150)
-          await prisma.credit.update({
-            where: { id: credit.id },
-            data: { commentsGIW: text },
-          })
-        }
-      } catch (err) {
-        console.error(`[generate] Comment failed for credit ${credit.creditId}:`, err)
-      }
+    } catch (err) {
+      console.error('[generate] GIW batch failed:', err)
     }
   }
 
@@ -929,18 +996,8 @@ export async function generateExcellenceOpportunities(projectId: string): Promis
     'urban ecology 2.3':  'This can be creepers, green wall systems or hanging plants cascading down.',
   }
 
-  for (const credit of eligible) {
-    const userPrompt = `Generate a short ESD Excellence Opportunity description for this credit.
-
-Project: ${project.name}${project.address ? `, ${project.address}` : ''}
-Credit: ${credit.creditId} ${credit.creditName}
-Current score: ${credit.creditScore != null ? `${credit.creditScore}%` : 'N/A'}  Max: ${credit.creditId.toLowerCase().trim() === 'ieq 1.4' ? '60%' : '100%'}
-Status: ${credit.creditStatus}
-Requirement: ${credit.creditRequirement ?? 'N/A'}
-Project data:
-${credit.rawDataPoints ?? 'No specific data recorded.'}
-
-Score thresholds (include only if relevant):
+  if (eligible.length > 0) {
+    const scoreThresholds = `Score thresholds (apply where relevant):
 - OE 1.1 NatHERS Houses/Townhouses: 12.5% credit score at 0% improvement, 37.5% at 10% improvement, 50% at 20% improvement, 100% at 60% improvement
 - OE 1.2 NatHERS Apartments: 50% credit score at 7.5 stars average, 75% at 8.0 stars, 100% at 8.5 stars average
 - OE 2.1 GHG emissions: continuous — score increases per % improvement, max at 20% reduction
@@ -949,7 +1006,7 @@ Score thresholds (include only if relevant):
 - OE 4.5 Solar Townhouses: min 30% for any points, 100% for maximum
 - IEQ 1.1 Daylight Living: 66% credit score when 80% of areas pass, 100% when 100% pass
 - IEQ 1.2 Daylight Bedrooms: 66% credit score when 80% of bedrooms pass, 100% when 100% pass
-- IEQ 2.1 Natural Ventilation: 66% credit score when 60% of apartments pass, 100% when 100% pass. This can be achieved through the introduction of mechanically assisted natural ventilation to non-cross ventilated apartments.
+- IEQ 2.1 Natural Ventilation: 66% credit score when 60% of apartments pass, 100% when 100% pass
 - IEQ 3.2 Thermal Comfort: continuous — score increases proportionally from 33%
 - IEQ 3.4 Noise: 66% credit score when 50% of areas achieve target, 100% when 100% achieve target
 - IEQ 1.4 Daylight Commercial: maximum achievable score is 60% — do not suggest exceeding this
@@ -959,42 +1016,70 @@ Score thresholds (include only if relevant):
 - Transport 2.1 EV Charging: minimum 1 EV charging station must be installed at practical completion to claim full points
 - Urban Ecology 2.2 Green Roof: Significant planters at roof or large terraces can be claimed as green roofs.
 - Urban Ecology 2.3 Green Wall: This can be creepers, green wall systems or hanging plants cascading down.
-- Innovation 1.1: 1 point per confirmed initiative, 10 points max
+- Innovation 1.1: 1 point per confirmed initiative, 10 points max`
 
-${/^iwm\s*1\.1$/i.test(credit.creditId.trim())
-  ? `Write 1–3 sentences describing how to improve this credit. Check the project data above — for each pathway not already in use (higher WELS ratings, toilet connection to rainwater/recycled water, landscape irrigation connection to rainwater/recycled water), mention it specifically. Do not mention pathways already achieved. Do not mention the credit weight.`
-  : `Write exactly 1 sentence describing the specific action needed to improve this credit, with the exact threshold or target value. Do not mention the current score. Do not mention the credit weight. Do not add extra sentences. Keep the response under 150 characters.`}`
+    const eligiblePayload = eligible.map(c => ({
+      id: c.id,
+      creditId: c.creditId,
+      name: c.creditName,
+      score: c.creditScore != null ? `${c.creditScore}%` : 'N/A',
+      maxScore: c.creditId.toLowerCase().trim() === 'ieq 1.4' ? '60%' : '100%',
+      status: c.creditStatus,
+      requirement: c.creditRequirement ?? 'N/A',
+      data: c.rawDataPoints ?? 'No specific data recorded.',
+      instruction: /^iwm\s*1\.1$/i.test(c.creditId.trim())
+        ? '1–3 sentences. Check the data — mention each improvement pathway NOT already in use (higher WELS ratings on fixtures, toilet connection to rainwater/recycled water, landscape irrigation connection to rainwater/recycled water). Do not mention pathways already achieved. Do not mention credit weight.'
+        : '1 sentence under 150 characters. Describe the specific action with the exact threshold or target value. Do not mention current score or credit weight.',
+    }))
+
+    const systemPrompt =
+      'You are an ESD consultant writing concise improvement notes for a BESS assessment. Be specific — cite actual numbers and thresholds from the data. No generic advice. No AI references. Never mention credit weights. Always use "retail" instead of "shop". Return ONLY a valid JSON object mapping each "id" to the description string.'
+
+    const userPrompt = `Project: ${project.name}${project.address ? `, ${project.address}` : ''}
+
+${scoreThresholds}
+
+For each credit below, generate the improvement description per its "instruction" field.
+Return a JSON object: { "id": "description" }
+
+${JSON.stringify(eligiblePayload, null, 2)}`
 
     try {
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: /^iwm\s*1\.1$/i.test(credit.creditId.trim()) ? 300 : 150,
-        system:
-          'You are an ESD consultant writing concise improvement notes for a BESS assessment. Be specific — cite actual numbers and thresholds from the project data. No generic advice. No AI references. One sentence only, under 150 characters: describe the specific improvement needed with an exact number or target. Never mention credit weights. Always use "retail" instead of "shop".',
+        max_tokens: 2048,
+        system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       })
 
+      console.log(`[generate] ESD batch usage — input: ${message.usage.input_tokens}, output: ${message.usage.output_tokens}`)
+
       const block = message.content[0]
       if (block.type === 'text') {
-        const suffix = EXCELLENCE_FIXED_SUFFIX[credit.creditId.toLowerCase().trim()]
-        const cleaned = stripAILeakage(block.text)
-        const description = suffix ? `${cleaned} ${suffix}` : cleaned
-        await prisma.eSDExcellenceOpportunity.create({
-          data: {
-            projectId,
-            creditId: credit.id,
-            creditReference: credit.creditId,
-            creditName: credit.creditName,
-            currentScore: (credit.creditStatus === 'N' && (credit.creditScore === 0 || credit.creditScore == null)) ? null : credit.creditScore,
-            improvementDescription: description,
-          },
-        })
+        const jsonMatch = block.text.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const results: Record<string, string> = JSON.parse(jsonMatch[0])
+          for (const c of eligible) {
+            const raw = results[c.id]
+            if (!raw) continue
+            const suffix = EXCELLENCE_FIXED_SUFFIX[c.creditId.toLowerCase().trim()]
+            const cleaned = stripAILeakage(String(raw))
+            const description = suffix ? `${cleaned} ${suffix}` : cleaned
+            await prisma.eSDExcellenceOpportunity.create({
+              data: {
+                projectId,
+                creditId: c.id,
+                creditReference: c.creditId,
+                creditName: c.creditName,
+                currentScore: (c.creditStatus === 'N' && (c.creditScore === 0 || c.creditScore == null)) ? null : c.creditScore,
+                improvementDescription: description,
+              },
+            })
+          }
+        }
       }
     } catch (err) {
-      console.error(
-        `[generate] Excellence opportunity failed for credit ${credit.creditId}:`,
-        err,
-      )
+      console.error('[generate] ESD batch failed:', err)
     }
   }
 
