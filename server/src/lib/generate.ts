@@ -1049,25 +1049,12 @@ export async function generateInnovationLineItems(projectId: string): Promise<vo
   for (const credit of umbrellaCredits) {
     if (!credit.rawDataPoints?.trim()) continue
 
-    // Extract the list of claimed initiative names and descriptions from the raw BESS data
-    let items: { name: string; desc: string | null }[] = []
-    try {
-      const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 800,
-        system: 'Extract innovation initiative names and descriptions from BESS assessment data. Return ONLY a valid JSON array of objects with "name" and "desc" string fields — no other text. If no description is available for an initiative, set "desc" to null.',
-        messages: [{
-          role: 'user',
-          content: `List the innovation initiatives claimed in this BESS data as a JSON array of {name, desc} objects:\n\n${credit.rawDataPoints}`,
-        }],
-      })
-      const raw = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : '[]'
-      const match = raw.match(/\[[\s\S]*\]/)
-      items = match ? (JSON.parse(match[0]) as { name: string; desc: string | null }[]) : []
-    } catch (err) {
-      console.error('[generate] Innovation extraction failed:', err)
-      continue
-    }
+    // Parse initiative names from the bullet list stored by the PDF ingestion step
+    const items: { name: string; desc: string | null }[] = credit.rawDataPoints
+      .split('\n')
+      .map(l => l.replace(/^[•\-*]\s*/, '').trim())
+      .filter(l => l.length > 0)
+      .map(name => ({ name, desc: null }))
 
     if (items.length === 0) continue
 
